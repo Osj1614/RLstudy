@@ -46,8 +46,8 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
 
         batches = runner.run_steps(model, currstep)
         
-        #lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
-        lr = model.learning_rate
+        lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
+        #lr = model.learning_rate
         if lr <= 1e-8:
             lr = 1e-8
         summary_data = model.train_batches(batches, lr, summaries)

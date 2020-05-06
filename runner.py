@@ -48,14 +48,14 @@ class Runner:
                 self.total_reward = 0
                 i += 1
         v_lst.append(np.squeeze(model.get_value([s])))
-        return [s_lst, a_lst, r_lst, done_lst, v_lst, action_prob_lst]
+        return [[s_lst, a_lst, r_lst, done_lst, v_lst, action_prob_lst]]
             
     def playgame(self, model):
         s = self.env.reset()
         reward_sum = 0
         while True:
             self.env.render()
-            action, _prob, _value= model.get_action(np.reshape(s, [-1]))
+            action, _prob, _value = model.get_action(np.reshape(s, [-1]))
             if self.clip:
                 ns, reward, done, _ = self.env.step(np.clip(action, self.env.action_space.low, self.env.action_space.high))
             else:

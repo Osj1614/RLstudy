@@ -24,7 +24,7 @@ def main():
     output_size = env.action_space.shape[0]
 
     with tf.Session() as sess:
-        name = 'humanoid_5M'
+        name = 'humanoid_all_mp_5m'
         with tf.variable_scope(name):
             input = tf.placeholder(tf.float32, [None, env.observation_space.shape[0]])
             #initializer = tf.contrib.layers.variance_scaling_initializer(dtype=tf.float32)
