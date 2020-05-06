@@ -46,7 +46,7 @@ class ProcRunner:
         self.writer = writer
         for p in self.p_pipe:
             s, _, _ = p.recv()
-            self.states.append(np.reshape(s, [-1]))
+            self.states.append(s)
     
     def run_steps(self, model, currstep=0):
         s_lst = [list() for _ in range(self.env_count)]
@@ -65,13 +65,13 @@ class ProcRunner:
             for i in range(self.env_count):
                 ns, reward, done = self.p_pipe[i].recv()
                 self.total_reward[i] += reward
-                s_lst[i].append(self.states[i].copy())
+                s_lst[i].append(np.copy(self.states[i]))
                 a_lst[i].append(action[i])
                 r_lst[i].append(reward)
                 v_lst[i].append(value[i])
                 action_prob_lst[i].append(action_prob[i])
                 done_lst[i].append(0 if done else 1)
-                self.states[i] = np.reshape(ns, [-1])
+                self.states[i] = ns
                 if done:
                     if self.writer != None:
                         score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=self.total_reward[i])])

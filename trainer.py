@@ -23,11 +23,12 @@ def load_model(sess, model, save_path):
 
 def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=False):
     model.make_summary()
+
     summaries = tf.summary.merge_all()
     writer = tf.summary.FileWriter("./logs/" + model.name, sess.graph)
     with tf.variable_scope(model.name):
         global_step = tf.Variable(initial_value=0, trainable=False, name="global_step")
-        increment_global_step = tf.assign_add(global_step, update_interval, name = 'increment_global_step')
+        increment_global_step = tf.assign_add(global_step, update_interval*num_envs, name = 'increment_global_step')
     save_path = "models/" + model.name + "/model.ckpt"
     sess.run(tf.global_variables_initializer())
     saver = load_model(sess, model, save_path)
@@ -39,18 +40,19 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
     else:
         runner = ProcRunner(env_name, num_envs, update_interval, writer=writer, atari=atari)
 
-    for i in range((num_steps - currstep) // update_interval):
+    for i in range((num_steps - currstep) // (update_interval * num_envs)):
         sess.run(increment_global_step)
-        currstep += update_interval
+        currstep += update_interval * num_envs
 
         batches = runner.run_steps(model, currstep)
         
-        lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
-        #lr = model.learning_rate
+        #lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
+        lr = model.learning_rate
         if lr <= 1e-8:
             lr = 1e-8
         summary_data = model.train_batches(batches, lr, summaries)
-        writer.add_summary(summary_data, currstep)
+        if summary_data != None:
+            writer.add_summary(summary_data, currstep)
 
         if i % 50 == 0:
             saver.save(sess, save_path)

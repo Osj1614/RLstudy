@@ -29,19 +29,18 @@ def main():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     session = tf.Session(config=config)
-    input_shape = [84, 84, 4]
     env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari('BreakoutNoFrameskip-v4'), frame_stack=True, scale=True)
     output_size = env.action_space.n
+    input_shape = env.observation_space.shape
 
     with tf.Session() as sess:
         with tf.variable_scope('Breakout_lr'):
-            input = tf.placeholder(tf.float32, [None, 84*84*4])
-            rinput = tf.reshape(input, [-1, *input_shape])
+            input = tf.placeholder(tf.float32, [None, *input_shape])
             
             #initializer = tf.contrib.layers.variance_scaling_initializer(dtype=tf.float32)
             initializer = tf.orthogonal_initializer(np.sqrt(2)) #Orthogonal initializer
 
-            network = add_cnn(rinput, 32, (8, 8), (4, 4), activation=tf.nn.relu, kernel_initializer=initializer, name="cnn1")
+            network = add_cnn(input, 32, (8, 8), (4, 4), activation=tf.nn.relu, kernel_initializer=initializer, name="cnn1")
             network = add_cnn(network, 64, (4, 4), (2, 2), activation=tf.nn.relu, kernel_initializer=initializer, name="cnn2")
             network = add_cnn(network, 64, (3, 3), (1, 1), activation=tf.nn.relu, kernel_initializer=initializer, name="cnn3")
             network = tf.contrib.layers.flatten(network)            

@@ -5,7 +5,7 @@ import actiontype
 from running_std import RunningMeanStd
 
 class PPO:
-    def __init__(self, sess, state, network, action_type, action_size, value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, v_clip=True):
+    def __init__(self, sess, state, network, action_type, action_size, value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, use_gae=True, v_clip=True):
         self.state = state
         self.sess = sess
         self.action_type = action_type
@@ -22,6 +22,7 @@ class PPO:
         self.minibatch_size=  minibatch_size
         self.v_clip = v_clip
         self.cumulative_reward = 0
+        self.use_gae = use_gae
 
         with tf.variable_scope("ppo"):
             if action_type == actiontype.Continuous:
@@ -70,8 +71,8 @@ class PPO:
             self.loss =  self.actor_loss - self.entropy * self.beta2 + self.critic_loss * self.beta
         
         params = tf.trainable_variables(self.name)
-        with tf.variable_scope('train'):        
-            trainer = tf.train.AdamOptimizer(learning_rate=self.lr)
+        with tf.variable_scope('train'):
+            trainer = tf.train.AdamOptimizer(learning_rate=self.lr, epsilon=1e-5)
             grads_and_var = trainer.compute_gradients(self.loss, params)
             grads, var = zip(*grads_and_var)
             if self.max_grad_norm != None:
@@ -106,22 +107,22 @@ class PPO:
         a, ap, v = self.sess.run([self.sample, self.neglogp, self.value], feed_dict={self.state : states})
         return a, ap, v
 
-    def run_train(self, batches, learning_rate):
+    def run_trains(self, returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst, learning_rate):
         end = 0
-        size = len(batches)
-        for e in range(self.epochs):
-            np.random.shuffle(batches)
+        size = len(returns_lst)
+        order = np.arange(size)
+        for _ in range(self.epochs):
             for i in range(0, size, self.minibatch_size):
                 end = i + self.minibatch_size
                 if end <= size:
-                    if self.action_type == actiontype.Continuous:
-                        self.sess.run(self.train, feed_dict={self.returns:batches[i:end, 0], \
-                            self.advantage:batches[i:end, 1], self.prevneglogp:batches[i:end, 2], self.old_value:batches[i:end,3], \
-                            self.actions:batches[i:end, 4:4+self.action_size], self.state : batches[i:end, 4+self.action_size:], self.lr : learning_rate})
-                    else:
-                        self.sess.run(self.train, feed_dict={self.returns:batches[i:end, 0], \
-                            self.advantage:batches[i:end, 1], self.prevneglogp:batches[i:end, 2], self.old_value:batches[i:end,3], \
-                            self.actions:batches[i:end, 4], self.state : batches[i:end, 5:], self.lr : learning_rate})
+                    ind = order[i:end]
+                    slices = (arr[ind] for arr in (returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst))
+                    self.run_train(*slices, learning_rate)
+
+    def run_train(self, returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst, learning_rate):
+        self.sess.run(self.train, feed_dict={self.returns:returns_lst, \
+            self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
+            self.actions:a_lst, self.state : s_lst, self.lr : learning_rate})
 
     def calc_gae(self, r_lst, value_lst, done_lst):
         cur = 0.0
@@ -137,7 +138,7 @@ class PPO:
     def train_batch(self, s_lst, a_lst, r_lst, done_lst, value_lst, action_prob_lst, learning_rate=None, summaries=None):
         if learning_rate == None:
             learning_rate = self.learning_rate
-        s_lst = np.clip(np.asarray(s_lst, dtype=np.float32), -10, 10)
+        s_lst = np.clip(np.asarray(s_lst, dtype=np.float32), -5, 5)
         r_lst = np.asarray(r_lst, dtype=np.float32)
         a_lst = np.asarray(a_lst, dtype=np.int32)
         value_lst = np.asarray(value_lst, dtype=np.float32)
@@ -155,7 +156,7 @@ class PPO:
         self.reward_std.update(cumulative_lst)
         r_lst /= math.sqrt(self.reward_std.var)
         r_lst = np.clip(r_lst, -5, 5)
-        if True: #GAE
+        if self.use_gae: #GAE
             advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
             value_lst = value_lst[:-1]
             returns_lst = value_lst + advantage_lst
@@ -165,16 +166,13 @@ class PPO:
             value_lst = value_lst[:-1]
             advantage_lst = returns_lst - value_lst
 
-            
-        batches = np.column_stack([returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst])
-        self.run_train(batches, learning_rate)
+        self.run_trains(returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst, learning_rate)
         return self.sess.run(summaries, feed_dict={self.returns:returns_lst, self.actions:a_lst, self.advantage:advantage_lst, \
             self.prevneglogp:action_prob_lst, self.old_value:value_lst, self.state : s_lst, self.lr : learning_rate})
 
     def train_batches(self, batch_lst, learning_rate=None, summaries=None):
         if learning_rate == None:
             learning_rate = self.learning_rate
-        batches = np.zeros([0, 4+self.action_size+len(batch_lst[0][0][0])])
 
         if not isinstance(self.cumulative_reward, list) or len(self.cumulative_reward) != len(batch_lst):
             self.cumulative_reward = [0 for _ in range(len(batch_lst))]
@@ -188,9 +186,15 @@ class PPO:
                 self.cumulative_reward[i] *= batch_lst[i][3][j]
 
             self.reward_std.update(cumulative_lst)
-
+        
+        s_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][0][0])])
+        a_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][1][0])])
+        advantage_lsts = np.empty([0])
+        action_prob_lsts = np.empty([0])
+        value_lsts = np.empty([0])
+        returns_lsts = np.empty([0])
         for batch in batch_lst:
-            s_lst = np.clip(np.asarray(batch[0], dtype=np.float32), -10, 10)
+            s_lst = np.clip(np.asarray(batch[0], dtype=np.float32), -5, 5)
             if self.action_type == actiontype.Discrete:
                 a_lst = np.asarray(batch[1], dtype=np.int32)
             else:
@@ -204,7 +208,7 @@ class PPO:
             size = len(done_lst)
             
             advantage_lst = np.zeros([size])
-            if True: #GAE
+            if self.use_gae: #GAE
                 advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
                 value_lst = value_lst[:-1]
                 returns_lst = value_lst + advantage_lst
@@ -214,10 +218,15 @@ class PPO:
                 value_lst = value_lst[:-1]
                 advantage_lst = returns_lst - value_lst
 
-            new_batch = np.column_stack([returns_lst, advantage_lst, action_prob_lst, value_lst, a_lst, s_lst])
-            batches = np.vstack((batches, new_batch))
-        self.run_train(batches, learning_rate)
-        return self.sess.run(summaries, feed_dict={self.returns:returns_lst, self.actions:a_lst, self.advantage:advantage_lst, \
-            self.prevneglogp:action_prob_lst, self.old_value:value_lst, self.state : s_lst, self.lr : learning_rate})
+            s_lsts = np.concatenate((s_lsts, s_lst), axis=0)
+            a_lsts = np.concatenate((a_lsts, a_lst), axis=0)
+            value_lsts = np.concatenate((value_lsts, value_lst), axis=0)
+            action_prob_lsts = np.concatenate((action_prob_lsts, action_prob_lst), axis=0)
+            advantage_lsts = np.concatenate((advantage_lsts, advantage_lst), axis=0)
+            returns_lsts = np.concatenate((returns_lsts, returns_lst), axis=0)
+
+        self.run_trains(returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, a_lsts, s_lsts, learning_rate)
+        return self.sess.run(summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
+            self.prevneglogp:action_prob_lsts, self.old_value:value_lsts, self.state : s_lsts, self.lr : learning_rate})
         
        
