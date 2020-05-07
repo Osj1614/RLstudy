@@ -112,6 +112,7 @@ class PPO:
         size = len(returns_lst)
         order = np.arange(size)
         for _ in range(self.epochs):
+            np.random.shuffle(order)
             for i in range(0, size, self.minibatch_size):
                 end = i + self.minibatch_size
                 if end <= size:
@@ -199,7 +200,7 @@ class PPO:
                 a_lst = np.asarray(batch[1], dtype=np.int32)
             else:
                 a_lst = np.asarray(batch[1], dtype=np.float32)
-            r_lst =np.asarray(batch[2], dtype=np.float32)
+            r_lst = np.asarray(batch[2], dtype=np.float32)
             r_lst /= math.sqrt(self.reward_std.var)
             r_lst =  np.clip(r_lst, -5 ,5)
             done_lst = np.asarray(batch[3], dtype=np.int32)
