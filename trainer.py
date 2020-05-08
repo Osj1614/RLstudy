@@ -2,6 +2,7 @@
 import tensorflow as tf
 import os
 import gym
+import time
 from runner import Runner
 from procrunner import ProcRunner
 
@@ -41,12 +42,22 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
         runner = ProcRunner(env_name, num_envs, update_interval, writer=writer, atari=atari)
 
     total_iter = (num_steps - currstep) // (update_interval * num_envs)
+    prevtime = time.time()
     for i in range(total_iter+1):
         sess.run(increment_global_step)
         currstep += update_interval * num_envs
 
         batches = runner.run_steps(model, currstep)
-        print(f"progress: {i}/{total_iter+1}")
+        
+        print(f"progress: {i+1}/{total_iter+1}")
+        currtime = time.time()
+        time_passed = currtime - prevtime
+        print(f"elapsed time: {round(time_passed, 3)} second")
+        print(f"time left: {round(time_passed*(total_iter-i)/3600, 3)} hour")
+        prevtime = currtime
+        print('-----------------------------------------------------------')
+
+
         if model.use_opt:
             lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
         else:
@@ -61,6 +72,7 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
             saver.save(sess, save_path)
         if i % (total_iter // 4) == 0 and i != 0:
             saver.save(sess, f"models/{model.name}/{i // (total_iter // 4)}/model.ckpt")
+
     if num_envs > 1:
         runner.close()
     saver.save(sess, save_path)
