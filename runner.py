@@ -12,6 +12,18 @@ class Runner:
         self.state = env.reset()
         self.total_reward = 0
         self.writer = writer
+        
+        self.avg = 0
+        self.high = -1000000
+        self.cnt = 0
+        
+    def get_avg_high(self):
+        avg = self.avg / (self.cnt+1e-8)
+        high = self.high
+        self.avg = 0
+        self.high = -1000000
+        self.cnt = 0
+        return avg, high
 
     def run_steps(self, model, currstep=0):
         s_lst = list()
@@ -44,17 +56,22 @@ class Runner:
                     self.writer.add_summary(score_summary_data, currstep)
                 self.state = self.env.reset()
                 s = np.reshape(self.state, [-1])
-                print(self.total_reward)
+                
+                self.avg += self.total_reward
+                self.cnt += 1
+                if self.total_reward > self.high:
+                    self.high = self.total_reward
                 self.total_reward = 0
                 i += 1
         v_lst.append(np.squeeze(model.get_value([s])))
         return [[s_lst, a_lst, r_lst, done_lst, v_lst, action_prob_lst]]
             
-    def playgame(self, model):
+    def playgame(self, model, render=True):
         s = self.env.reset()
         reward_sum = 0
         while True:
-            self.env.render()
+            if render:
+                self.env.render()
             action, _prob, _value = model.get_action(np.reshape(s, [-1]))
             if self.clip:
                 ns, reward, done, _ = self.env.step(np.clip(action, self.env.action_space.low, self.env.action_space.high))

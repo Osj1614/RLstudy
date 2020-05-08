@@ -22,7 +22,7 @@ def load_model(sess, model, save_path):
 
     return saver
 
-def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=False):
+def train(sess, model, env_name, num_steps, update_interval, log_interval=10, num_envs=1, atari=False):
     model.make_summary()
 
     summaries = tf.summary.merge_all()
@@ -49,13 +49,17 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
 
         batches = runner.run_steps(model, currstep)
         
-        print(f"progress: {i+1}/{total_iter+1}")
-        currtime = time.time()
-        time_passed = currtime - prevtime
-        print(f"elapsed time: {round(time_passed, 3)} second")
-        print(f"time left: {round(time_passed*(total_iter-i)/3600, 3)} hour")
-        prevtime = currtime
-        print('-----------------------------------------------------------')
+        if i % log_interval == 0:
+            avg, high = runner.get_avg_high()
+            print(f"Average score:\t{round(avg,3)}")
+            print(f"High score:\t{round(high,3)}")
+            print(f"progress:\t{i+1}/{total_iter+1}")
+            currtime = time.time()
+            time_passed = currtime - prevtime
+            print(f"elapsed time:\t{round(time_passed, 3)} second")
+            print(f"time left:\t{round(time_passed*(total_iter-i)/log_interval/3600, 3)} hour")
+            prevtime = currtime
+            print('-----------------------------------------------------------')
 
 
         if model.use_opt:
@@ -77,7 +81,7 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
         runner.close()
     saver.save(sess, save_path)
 
-def run_only(sess, model, env):
+def run_only(sess, model, env, render=True):
     save_path = "models/" + model.name + "/model.ckpt"
     load_model(sess, model, save_path)
     total_reward = 0
@@ -86,7 +90,7 @@ def run_only(sess, model, env):
     avg = 0
     high = -1000
     for i in range(100):
-        total_reward = runner.playgame(model)
+        total_reward = runner.playgame(model, render=render)
         print(total_reward)
         if total_reward > high:
             high = total_reward

@@ -10,7 +10,7 @@ from multiprocessing import Pipe, Process
 
 def worker(env_name, pipe, atari=False):
     if atari:
-        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), frame_stack=True, scale=True)
+        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=False, clip_rewards=False, frame_stack=True, scale=True)
     else:
         env = gym.make(env_name)
     s = env.reset()
@@ -47,7 +47,21 @@ class ProcRunner:
         for p in self.p_pipe:
             s, _, _ = p.recv()
             self.states.append(s)
+
+        self.avg = 0
+        self.high = -1000000
+        self.cnt = 0
     
+        
+    def get_avg_high(self):
+        avg = self.avg / (self.cnt+1e-8)
+        high = self.high
+        self.avg = 0
+        self.high = -1000000
+        self.cnt = 0
+        return avg, high
+        
+
     def run_steps(self, model, currstep=0):
         s_lst = [list() for _ in range(self.env_count)]
         a_lst = [list() for _ in range(self.env_count)]
@@ -56,9 +70,6 @@ class ProcRunner:
         v_lst = [list() for _ in range(self.env_count)]
         action_prob_lst = [list() for _ in range(self.env_count)]
 
-        avg = 0
-        high = -1000000
-        cnt = 0
 
         for _ in range(self.update_interval):
             currstep += 1
@@ -80,17 +91,16 @@ class ProcRunner:
                     if self.writer != None:
                         score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=self.total_reward[i])])
                         self.writer.add_summary(score_summary_data, currstep)
-                    avg += self.total_reward[i]
-                    cnt += 1
-                    if self.total_reward[i] > high:
-                        high = self.total_reward[i]
+                    self.avg += self.total_reward[i]
+                    self.cnt += 1
+                    if self.total_reward[i] > self.high:
+                        self.high = self.total_reward[i]
                     self.total_reward[i] = 0
                     i += 1
         last_values = model.get_value(self.states)
         for i in range(self.env_count):
             v_lst[i].append(last_values[i])
-        print(f"Average reward: {avg / cnt}")
-        print(f"High score: {high}")
+
         return [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], v_lst[i], action_prob_lst[i]] for i in range(self.env_count)] 
 
     def close(self):
