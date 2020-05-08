@@ -40,14 +40,17 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
     else:
         runner = ProcRunner(env_name, num_envs, update_interval, writer=writer, atari=atari)
 
-    for i in range((num_steps - currstep) // (update_interval * num_envs)):
+    total_iter = (num_steps - currstep) // (update_interval * num_envs)
+    for i in range(total_iter+1):
         sess.run(increment_global_step)
         currstep += update_interval * num_envs
 
         batches = runner.run_steps(model, currstep)
-        
-        lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
-        #lr = model.learning_rate
+        print(f"progress: {i}/{total_iter+1}")
+        if model.use_opt:
+            lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
+        else:
+            lr = model.learning_rate
         if lr <= 1e-8:
             lr = 1e-8
         summary_data = model.train_batches(batches, lr, summaries)
@@ -56,6 +59,8 @@ def train(sess, model, env_name, num_steps, update_interval, num_envs=1, atari=F
 
         if i % 50 == 0:
             saver.save(sess, save_path)
+        if i % (total_iter // 4) == 0 and i != 0:
+            saver.save(sess, f"models/{model.name}/{i // (total_iter // 4)}/model.ckpt")
     if num_envs > 1:
         runner.close()
     saver.save(sess, save_path)

@@ -56,6 +56,10 @@ class ProcRunner:
         v_lst = [list() for _ in range(self.env_count)]
         action_prob_lst = [list() for _ in range(self.env_count)]
 
+        avg = 0
+        high = -1000000
+        cnt = 0
+
         for _ in range(self.update_interval):
             currstep += 1
             action, action_prob, value = model.get_actions(self.states)
@@ -76,12 +80,17 @@ class ProcRunner:
                     if self.writer != None:
                         score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=self.total_reward[i])])
                         self.writer.add_summary(score_summary_data, currstep)
-                    print(self.total_reward[i])
+                    avg += self.total_reward[i]
+                    cnt += 1
+                    if self.total_reward[i] > high:
+                        high = self.total_reward[i]
                     self.total_reward[i] = 0
                     i += 1
         last_values = model.get_value(self.states)
         for i in range(self.env_count):
             v_lst[i].append(last_values[i])
+        print(f"Average reward: {avg / cnt}")
+        print(f"High score: {high}")
         return [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], v_lst[i], action_prob_lst[i]] for i in range(self.env_count)] 
 
     def close(self):
