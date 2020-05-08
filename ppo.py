@@ -5,7 +5,7 @@ import actiontype
 from running_std import RunningMeanStd
 
 class PPO:
-    def __init__(self, sess, state, network, action_type, action_size, value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, use_gae=True, v_clip=True):
+    def __init__(self, sess, state, network, action_type, action_size, value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, use_gae=True, use_opt=True):
         self.state = state
         self.sess = sess
         self.action_type = action_type
@@ -20,9 +20,9 @@ class PPO:
         self.max_grad_norm = max_grad_norm
         self.epochs = epochs
         self.minibatch_size=  minibatch_size
-        self.v_clip = v_clip
         self.cumulative_reward = 0
         self.use_gae = use_gae
+        self.use_opt = use_opt
 
         with tf.variable_scope("ppo"):
             if action_type == actiontype.Continuous:
@@ -61,7 +61,7 @@ class PPO:
             self.entropy = tf.reduce_mean(self.action.entropy())
         with tf.variable_scope('Critic_loss'):
             critic_loss1 = tf.squared_difference(self.returns, self.value)
-            if self.v_clip:
+            if self.use_opt:
                 critic_loss2 = tf.squared_difference(self.returns, self.old_value + tf.clip_by_value(self.value - self.old_value, -self.epsilon, self.epsilon))
                 self.vclipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(self.value - self.old_value), self.epsilon)))
                 self.critic_loss = tf.reduce_mean(tf.maximum(critic_loss1, critic_loss2)) * 0.5
@@ -75,7 +75,7 @@ class PPO:
             trainer = tf.train.AdamOptimizer(learning_rate=self.lr, epsilon=1e-5)
             grads_and_var = trainer.compute_gradients(self.loss, params)
             grads, var = zip(*grads_and_var)
-            if self.max_grad_norm != None:
+            if self.max_grad_norm != None and self.use_opt:
                 grads, _ = tf.clip_by_global_norm(grads, self.max_grad_norm)
             grads_and_var = list(zip(grads, var))
             self.train = trainer.apply_gradients(grads_and_var)
@@ -88,8 +88,6 @@ class PPO:
         tf.summary.scalar('value', tf.reduce_mean(self.value))
         tf.summary.scalar('clip_fraction', self.clipfrac)
         tf.summary.scalar('learning_rate', self.lr)
-        if self.v_clip:
-            tf.summary.scalar('value_clip_fraction', self.vclipfrac)
         
 
     def get_value(self, state):
@@ -155,8 +153,10 @@ class PPO:
             self.cumulative_reward *= done_lst[i]
 
         self.reward_std.update(cumulative_lst)
-        r_lst /= math.sqrt(self.reward_std.var)
-        r_lst = np.clip(r_lst, -5, 5)
+        if self.use_opt:
+            r_lst /= math.sqrt(self.reward_std.var)
+            r_lst = np.clip(r_lst, -5, 5)
+
         if self.use_gae: #GAE
             advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
             value_lst = value_lst[:-1]

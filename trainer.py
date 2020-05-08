@@ -66,6 +66,13 @@ def run_only(sess, model, env):
     total_reward = 0
     env.render()
     runner = Runner(env, 0, True)
-    while True:
+    avg = 0
+    high = -1000
+    for i in range(100):
         total_reward = runner.playgame(model)
         print(total_reward)
+        if total_reward > high:
+            high = total_reward
+        avg += total_reward
+    print(f"average: {avg/100}")
+    print(f"max score: {high}")
