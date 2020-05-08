@@ -44,7 +44,7 @@ def main():
             network = add_dense(network, 512, activation=tf.nn.relu, kernel_initializer=initializer, name="dense1")
 
             model = PPO(sess, input, network, actiontype.Discrete, output_size, learning_rate=2.5e-4, epochs=4, minibatch_size=4, gamma=0.99, beta2=0.01, name='Breakout_lr')
-        train(sess, model, env_name, 10000000, 128, num_envs=4, atari=True)
+        train(sess, model, env_name, 10000000, 128, log_interval=30, num_envs=4, atari=True)
         run_only(sess, model, env, render=True)
         env.close()
         

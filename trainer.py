@@ -41,9 +41,10 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, nu
     else:
         runner = ProcRunner(env_name, num_envs, update_interval, writer=writer, atari=atari)
 
-    total_iter = (num_steps - currstep) // (update_interval * num_envs)
+    total_iter = num_steps // (update_interval * num_envs)
+    curr_iter = currstep // (update_interval * num_envs)
     prevtime = time.time()
-    for i in range(total_iter+1):
+    for i in range(curr_iter, total_iter+1):
         sess.run(increment_global_step)
         currstep += update_interval * num_envs
 
@@ -53,7 +54,7 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, nu
             avg, high = runner.get_avg_high()
             print(f"Average score:\t{round(avg,3)}")
             print(f"High score:\t{round(high,3)}")
-            print(f"progress:\t{i+1}/{total_iter+1}")
+            print(f"progress:\t{i+1}/{total_iter+1} ({round((i+1)/(total_iter+1), 2)}%)")
             currtime = time.time()
             time_passed = currtime - prevtime
             print(f"elapsed time:\t{round(time_passed, 3)} second")
