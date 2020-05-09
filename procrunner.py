@@ -34,7 +34,7 @@ def worker(env_name, pipe, atari=False):
 
 
 class ProcRunner:
-    def __init__(self, env_name, env_count, update_interval, writer=None, atari=False):
+    def __init__(self, env_name, env_count, update_interval, atari=False):
         self.update_interval = update_interval
         self.env_count = env_count
         self.p_pipe, c_pipe = zip(*[Pipe() for _ in range(env_count)])
@@ -43,7 +43,6 @@ class ProcRunner:
             w.start()
         self.states = list()
         self.total_reward = [0 for _ in range(env_count)]
-        self.writer = writer
         for p in self.p_pipe:
             s, _, _ = p.recv()
             self.states.append(s)
@@ -88,9 +87,6 @@ class ProcRunner:
                 done_lst[i].append(0 if done else 1)
                 self.states[i] = ns
                 if done:
-                    if self.writer != None:
-                        score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=self.total_reward[i])])
-                        self.writer.add_summary(score_summary_data, currstep)
                     self.avg += self.total_reward[i]
                     self.cnt += 1
                     if self.total_reward[i] > self.high:

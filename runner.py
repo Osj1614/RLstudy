@@ -5,7 +5,7 @@ import time
 import math
 
 class Runner:
-    def __init__(self, env, update_interval, writer=None, clip=False):
+    def __init__(self, env, update_interval, clip=False):
         self.env = env
         self.update_interval = update_interval
         self.clip = clip
@@ -51,9 +51,6 @@ class Runner:
             self.state = ns
             s = np.reshape(self.state, [-1])
             if done:
-                if self.writer != None:
-                    score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=self.total_reward)])
-                    self.writer.add_summary(score_summary_data, currstep)
                 self.state = self.env.reset()
                 s = np.reshape(self.state, [-1])
                 

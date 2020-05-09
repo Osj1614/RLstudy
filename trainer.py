@@ -22,7 +22,7 @@ def load_model(sess, model, save_path):
 
     return saver
 
-def train(sess, model, env_name, num_steps, update_interval, log_interval=10, num_envs=1, atari=False):
+def train(sess, model, env_name, num_steps, update_interval, log_interval=10, save_interval=50, num_envs=1, atari=False):
     model.make_summary()
 
     summaries = tf.summary.merge_all()
@@ -37,9 +37,9 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, nu
     currstep = sess.run(global_step)
     
     if num_envs == 1:
-        runner = Runner(gym.make(env_name), update_interval, writer=writer, clip=True)
+        runner = Runner(gym.make(env_name), update_interval, clip=True)
     else:
-        runner = ProcRunner(env_name, num_envs, update_interval, writer=writer, atari=atari)
+        runner = ProcRunner(env_name, num_envs, update_interval, atari=atari)
 
     total_iter = num_steps // (update_interval * num_envs)
     curr_iter = currstep // (update_interval * num_envs)
@@ -50,16 +50,21 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, nu
 
         batches = runner.run_steps(model, currstep)
         
-        if i % log_interval == 0:
+        if (i+1) % log_interval == 0:
             avg, high = runner.get_avg_high()
             print(f"Average score:\t{round(avg,3)}")
             print(f"High score:\t{round(high,3)}")
-            print(f"progress:\t{i+1}/{total_iter+1} ({round((i+1)/(total_iter+1), 2)}%)")
+            print(f"progress:\t{i+1}/{total_iter+1} ({round((i+1)/(total_iter+1)*100, 2)}%)")
             currtime = time.time()
             time_passed = currtime - prevtime
             print(f"elapsed time:\t{round(time_passed, 3)} second")
             print(f"time left:\t{round(time_passed*(total_iter-i)/log_interval/3600, 3)} hour")
             prevtime = currtime
+            if high != -100000:
+                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=avg)])
+                writer.add_summary(score_summary_data, currstep)
+                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score_high", simple_value=high)])
+                writer.add_summary(score_summary_data, currstep)
             print('-----------------------------------------------------------')
 
 
@@ -73,7 +78,7 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, nu
         if summary_data != None:
             writer.add_summary(summary_data, currstep)
 
-        if i % 50 == 0:
+        if (i+1) % save_interval == 0:
             saver.save(sess, save_path)
         if i % (total_iter // 4) == 0 and i != 0:
             saver.save(sess, f"models/{model.name}/{i // (total_iter // 4)}/model.ckpt")

@@ -153,9 +153,8 @@ class PPO:
             self.cumulative_reward *= done_lst[i]
 
         self.reward_std.update(cumulative_lst)
-        if self.use_opt:
-            r_lst /= math.sqrt(self.reward_std.var)
-            r_lst = np.clip(r_lst, -5, 5)
+        r_lst /= math.sqrt(self.reward_std.var)
+        r_lst = np.clip(r_lst, -5, 5)
 
         if self.use_gae: #GAE
             advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
