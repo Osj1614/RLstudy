@@ -1,52 +1,44 @@
 import numpy as np
 import math
+from ppo import PPO
 import tensorflow as tf
 import actiontype
 from running_std import RunningMeanStd
 
-class PPO:
-    def __init__(self, sess, state, network, action_type, action_size, value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16):
-        self.state = state
-        self.sess = sess
-        self.action_type = action_type
-        self.action_size = action_size
-        self.name = name
-        self.learning_rate = learning_rate
-        self.beta = beta
-        self.beta2 = beta2
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.lamda = lamda
-        self.max_grad_norm = max_grad_norm
-        self.epochs = epochs
-        self.minibatch_size=  minibatch_size
-        self.cumulative_reward = 0
+class RND(PPO):
+    def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, \
+            value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, \
+                gamma_in=0.99, coef_in=0.5):
+        self.gamma_in = gamma_in
+        self.coef_in = coef_in
+        self.target_network = target_network
+        self.predictor_network = predictor_network
+        self.reward_in = tf.reduce_mean(tf.square(self.predictor_network - self.target_network), axis=-1)
+        self.reward_in_rms = RunningMeanStd(sess, scope="cumulative_reward_in")
+        self.state_rms = state_rms
+        super().__init__(sess, state, network, action_type, action_size, value_network, name, learning_rate, beta, beta2, gamma, epsilon, lamda, max_grad_norm, epochs, minibatch_size)
 
-        with tf.variable_scope("ppo"):
-            if action_type == actiontype.Continuous:
-                self.action = actiontype.continuous(network, action_size)
-                self.actions = tf.placeholder(tf.float32, [None, self.action_size], name="Action")
-            else:
-                self.action = actiontype.discrete(network, action_size)
-                self.actions = tf.placeholder(tf.int32, [None], name="Action")
-                self.action_size = 1
-            self.reward_rms = RunningMeanStd(sess, scope="cumulative_reward")
-            self.sample = self.action.sample()
-            self.neglogp = self.action.neglogp(self.sample)
-            self.bulid_train(network, value_network)
-        
+    def make_summary(self):
+        super().make_summary()
+        tf.summary.scalar('critic_in_loss', self.critic_in_loss)
+
     def bulid_train(self, network, value_network=None):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
         self.old_value = tf.placeholder(tf.float32, [None], name="Old_value")
         self.returns = tf.placeholder(tf.float32, [None], name="Returns")
+        self.returns_in = tf.placeholder(tf.float32, [None], name="Returns_intrinsic")
         self.prevneglogp = tf.placeholder(tf.float32, [None], name="Old_pi_a")
         self.lr = tf.placeholder(tf.float32, [], name="Learning_rate")
 
         if value_network == None:
             self.value = tf.layers.dense(network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
+            self.value_in = tf.layers.dense(network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         else:
             self.value = tf.layers.dense(value_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
+            self.value_in = tf.layers.dense(value_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         self.value = self.value[:, 0]
+        self.value_in = self.value_in[:, 0]
+
         with tf.variable_scope('Actor_loss'):
             pi_a = self.action.neglogp(self.actions)
             ratio = tf.exp(self.prevneglogp - pi_a)
@@ -62,8 +54,14 @@ class PPO:
             critic_loss2 = tf.squared_difference(self.returns, self.old_value + tf.clip_by_value(self.value - self.old_value, -self.epsilon, self.epsilon))
             self.vclipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(self.value - self.old_value), self.epsilon)))
             self.critic_loss = tf.reduce_mean(tf.maximum(critic_loss1, critic_loss2)) * 0.5
+
+            self.critic_in_loss = tf.reduce_mean(tf.squared_difference(self.returns_in, self.value_in)) * 0.5
+            
+        with tf.variable_scope('RND_loss'):
+            self.rndloss = tf.reduce_mean(tf.square(tf.stop_gradient(self.target_network) - self.predictor_network))
+        
         with tf.variable_scope('Total_loss'):
-            self.loss =  self.actor_loss - self.entropy * self.beta2 + self.critic_loss * self.beta
+            self.loss =  self.actor_loss - self.entropy * self.beta2 + (self.critic_loss + self.critic_in_loss) * self.beta + self.rndloss
         
         params = tf.trainable_variables(self.name)
         with tf.variable_scope('train'):
@@ -75,29 +73,14 @@ class PPO:
             grads_and_var = list(zip(grads, var))
             self.train = trainer.apply_gradients(grads_and_var)
 
-    def make_summary(self):
-        tf.summary.scalar('loss', self.loss)
-        tf.summary.scalar('actor_loss', self.actor_loss)
-        tf.summary.scalar('critic_loss', self.critic_loss)
-        tf.summary.scalar('entropy', self.entropy)
-        tf.summary.scalar('value', tf.reduce_mean(self.value))
-        tf.summary.scalar('clip_fraction', self.clipfrac)
-        tf.summary.scalar('learning_rate', self.lr)
-        
-    def get_value(self, state):
-        feed_dict = {self.state : state}
-        return self.sess.run(self.value, feed_dict)
-
-    def get_action(self, state):
-        a = self.sess.run(self.sample, feed_dict={self.state : [state]})
-        a = np.squeeze(a, 0)
-        return a
-
     def get_actions(self, states):
         a, ap = self.sess.run([self.sample, self.neglogp], feed_dict={self.state : states})
         return a, ap
 
-    def run_trains(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, learning_rate):
+    def get_intrinsic(self, state):
+        return self.sess.run((self.reward_in, self.value_in), feed_dict={self.state : state})
+
+    def run_trains(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, returns_in_lst, learning_rate):
         end = 0
         size = len(returns_lst)
         order = np.arange(size)
@@ -107,24 +90,13 @@ class PPO:
                 end = i + self.minibatch_size
                 if end <= size:
                     ind = order[i:end]
-                    slices = (arr[ind] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst))
+                    slices = (arr[ind] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, returns_in_lst))
                     self.run_train(*slices, learning_rate)
 
-    def run_train(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, learning_rate):
+    def run_train(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, returns_in_lst, learning_rate):
         self.sess.run(self.train, feed_dict={self.returns:returns_lst, \
             self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
-            self.actions:a_lst, self.state : s_lst, self.lr : learning_rate})
-
-    def calc_gae(self, r_lst, value_lst, done_lst, gamma=None):
-        if gamma == None:
-            gamma = self.gamma
-        cur = 0.0
-        size = len(r_lst)
-        advantage_lst = np.zeros(size)
-        for i in reversed(range(size)):
-            delta = r_lst[i] + gamma * value_lst[i+1] * done_lst[i] - value_lst[i]
-            advantage_lst[i] = cur = self.lamda * gamma * done_lst[i] * cur + delta
-        return advantage_lst
+            self.actions:a_lst, self.state : s_lst, self.returns_in : returns_in_lst, self.lr : learning_rate})
 
     def train_batches(self, batch_lst, learning_rate=None, summaries=None):
         if learning_rate == None:
@@ -142,6 +114,7 @@ class PPO:
                 self.cumulative_reward[i] *= batch_lst[i][3][j]
 
             self.reward_rms.update(cumulative_lst)
+            self.state_rms.update(batch_lst[i][0])
         
         s_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][0][0])])
         a_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][1][0])])
@@ -149,9 +122,16 @@ class PPO:
         action_prob_lsts = np.empty([0])
         value_lsts = np.empty([0])
         returns_lsts = np.empty([0])
+        returns_in_lsts = np.empty([0])
         for batch in batch_lst:
             s_lst = np.asarray(batch[0])
             value_lst = self.get_value(s_lst)
+            r_in_lst, value_in_lst = self.get_intrinsic(s_lst)
+            r_in_lst = r_in_lst[:-1]
+            self.reward_in_rms.update(r_in_lst)
+            r_in_lst /= math.sqrt(self.reward_in_rms.var)
+            r_in_lst =  np.clip(r_in_lst, -5 ,5)
+
             s_lst = s_lst[:-1]
             if self.action_type == actiontype.Discrete:
                 a_lst = np.asarray(batch[1], dtype=np.int32)
@@ -163,22 +143,31 @@ class PPO:
             done_lst = np.asarray(batch[3], dtype=np.int32)
             action_prob_lst = np.asarray(batch[4], dtype=np.float32)
             size = len(done_lst)
-            
+
+            advantage_lst = np.zeros([size])
+
             advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
             value_lst = value_lst[:-1]
             returns_lst = value_lst + advantage_lst
             advantage_lst = (advantage_lst - advantage_lst.mean()) / (advantage_lst.std() + 1e-8)
 
+            advantage_in_lst = self.calc_gae(r_in_lst, value_in_lst, np.ones_like(done_lst), self.gamma_in)
+            value_in_lst = value_in_lst[:-1]
+            returns_in_lst = value_in_lst + advantage_in_lst
+            advantage_in_lst = (advantage_in_lst - advantage_in_lst.mean()) / (advantage_in_lst.std() + 1e-8)
+
             s_lsts = np.concatenate((s_lsts, s_lst), axis=0)
             a_lsts = np.concatenate((a_lsts, a_lst), axis=0)
             value_lsts = np.concatenate((value_lsts, value_lst), axis=0)
             action_prob_lsts = np.concatenate((action_prob_lsts, action_prob_lst), axis=0)
-            advantage_lsts = np.concatenate((advantage_lsts, advantage_lst), axis=0)
+            advantage_lsts = np.concatenate((advantage_lsts, advantage_lst+advantage_in_lst*self.coef_in), axis=0)
             returns_lsts = np.concatenate((returns_lsts, returns_lst), axis=0)
+            returns_in_lsts = np.concatenate((returns_in_lsts, returns_in_lst), axis=0)
 
-        self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, learning_rate)
+        self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, returns_in_lsts, learning_rate)
+
         if summaries != None:
             return self.sess.run(summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
-                self.prevneglogp:action_prob_lsts, self.old_value:value_lsts, self.state : s_lsts, self.lr : learning_rate})
+                self.prevneglogp:action_prob_lsts, self.old_value:value_lsts, self.state : s_lsts, self.returns_in : returns_in_lsts, self.lr : learning_rate})
         
        

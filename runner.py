@@ -11,7 +11,6 @@ class Runner:
         self.clip = clip
         self.state = env.reset()
         self.total_reward = 0
-        self.writer = writer
         
         self.avg = 0
         self.high = -1000000
@@ -30,13 +29,12 @@ class Runner:
         a_lst = list()
         r_lst = list()
         done_lst = list()
-        v_lst = list()
         action_prob_lst = list()
         i = 0
         s = np.reshape(self.state, [-1])
         for _ in range(self.update_interval):
             currstep += 1
-            action, action_prob, value = model.get_action(s)
+            action, action_prob = model.get_action(s)
             if self.clip:
                 ns, reward, done, _ = self.env.step(np.clip(action, self.env.action_space.low, self.env.action_space.high))
             else:
@@ -45,7 +43,6 @@ class Runner:
             s_lst.append(s.copy())
             a_lst.append(action)
             r_lst.append(reward)
-            v_lst.append(value)
             action_prob_lst.append(action_prob)
             done_lst.append(0 if done else 1)
             self.state = ns
@@ -60,8 +57,8 @@ class Runner:
                     self.high = self.total_reward
                 self.total_reward = 0
                 i += 1
-        v_lst.append(np.squeeze(model.get_value([s])))
-        return [[s_lst, a_lst, r_lst, done_lst, v_lst, action_prob_lst]]
+        s_lst.append(self.state)
+        return [[s_lst, a_lst, r_lst, done_lst, action_prob_lst]]
             
     def playgame(self, model, render=True):
         s = self.env.reset()
@@ -69,7 +66,7 @@ class Runner:
         while True:
             if render:
                 self.env.render()
-            action, _prob, _value = model.get_action(np.reshape(s, [-1]))
+            action = model.get_action(np.reshape(s, [-1]))
             if self.clip:
                 ns, reward, done, _ = self.env.step(np.clip(action, self.env.action_space.low, self.env.action_space.high))
             else:

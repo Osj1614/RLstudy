@@ -41,7 +41,7 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
     else:
         runner = ProcRunner(env_name, num_envs, update_interval, atari=atari)
 
-    total_iter = num_steps // (update_interval * num_envs)
+    total_iter = int(num_steps // (update_interval * num_envs))
     curr_iter = currstep // (update_interval * num_envs)
     prevtime = time.time()
     for i in range(curr_iter, total_iter+1):
@@ -68,8 +68,8 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
             print('-----------------------------------------------------------')
 
 
-        if model.use_opt:
-            lr = model.learning_rate * (1 - currstep / num_steps) #LR annealing
+        if callable(model.learning_rate):
+            lr = model.learning_rate(currstep / num_steps)
         else:
             lr = model.learning_rate
         if lr <= 1e-8:

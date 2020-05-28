@@ -1,8 +1,4 @@
-import tensorflow as tf
-import os
 import numpy as np
-import time
-import math
 import gym
 from gym.spaces.box import Box
 import atari_wrappers
@@ -10,7 +6,7 @@ from multiprocessing import Pipe, Process
 
 def worker(env_name, pipe, atari=False):
     if atari:
-        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=False, clip_rewards=False, frame_stack=True, scale=True)
+        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=True, clip_rewards=True, frame_stack=True, scale=True)
     else:
         env = gym.make(env_name)
     s = env.reset()
@@ -69,10 +65,9 @@ class ProcRunner:
         v_lst = [list() for _ in range(self.env_count)]
         action_prob_lst = [list() for _ in range(self.env_count)]
 
-
         for _ in range(self.update_interval):
             currstep += 1
-            action, action_prob, value = model.get_actions(self.states)
+            action, action_prob = model.get_actions(self.states)
             for i in range(self.env_count):
                 self.p_pipe[i].send(('step',action[i]))
 
@@ -82,7 +77,6 @@ class ProcRunner:
                 s_lst[i].append(np.copy(self.states[i]))
                 a_lst[i].append(action[i])
                 r_lst[i].append(reward)
-                v_lst[i].append(value[i])
                 action_prob_lst[i].append(action_prob[i])
                 done_lst[i].append(0 if done else 1)
                 self.states[i] = ns
@@ -93,11 +87,10 @@ class ProcRunner:
                         self.high = self.total_reward[i]
                     self.total_reward[i] = 0
                     i += 1
-        last_values = model.get_value(self.states)
         for i in range(self.env_count):
-            v_lst[i].append(last_values[i])
+            s_lst[i].append(self.states[i])
 
-        return [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], v_lst[i], action_prob_lst[i]] for i in range(self.env_count)] 
+        return [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], action_prob_lst[i]] for i in range(self.env_count)] 
 
     def close(self):
         for p in self.p_pipe:

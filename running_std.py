@@ -16,15 +16,15 @@ def update_mean_var_count_from_moments(mean, var, count, batch_mean, batch_var, 
 
 class RunningMeanStd:
     def __init__(self, sess, epsilon=1e-4, shape=(), scope=''):
-        self._new_mean = tf.placeholder(shape=shape, dtype=tf.float64)
-        self._new_var = tf.placeholder(shape=shape, dtype=tf.float64)
-        self._new_count = tf.placeholder(shape=(), dtype=tf.float64)
+        self._new_mean = tf.placeholder(shape=shape, dtype=tf.float32)
+        self._new_var = tf.placeholder(shape=shape, dtype=tf.float32)
+        self._new_count = tf.placeholder(shape=(), dtype=tf.float32)
 
 
         with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
-            self._mean  = tf.get_variable('mean',  initializer=np.zeros(shape, 'float64'),      dtype=tf.float64)
-            self._var   = tf.get_variable('std',   initializer=np.ones(shape, 'float64'),       dtype=tf.float64)
-            self._count = tf.get_variable('count', initializer=np.full((), epsilon, 'float64'), dtype=tf.float64)
+            self._mean  = tf.get_variable('mean',  initializer=np.zeros(shape, 'float32'),      dtype=tf.float32, trainable=False)
+            self._var   = tf.get_variable('std',   initializer=np.ones(shape, 'float32'),       dtype=tf.float32, trainable=False)
+            self._count = tf.get_variable('count', initializer=np.full((), epsilon, 'float32'), dtype=tf.float32, trainable=False)
 
         self.update_ops = tf.group([
             self._var.assign(self._new_var),
@@ -41,6 +41,7 @@ class RunningMeanStd:
         self.mean, self.var, self.count = self.sess.run([self._mean, self._var, self._count])
 
     def update(self, x):
+        x = np.asarray(x)
         batch_mean = np.mean(x, axis=0)
         batch_var = np.var(x, axis=0)
         batch_count = x.shape[0]
