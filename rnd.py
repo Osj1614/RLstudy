@@ -21,6 +21,7 @@ class RND(PPO):
     def make_summary(self):
         super().make_summary()
         tf.summary.scalar('critic_in_loss', self.critic_in_loss)
+        tf.summary.scalar('intrinsic_reward', tf.reduce_mean(self.reward_in))
 
     def bulid_train(self, network, value_network=None):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
