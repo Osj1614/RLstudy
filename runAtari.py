@@ -9,7 +9,7 @@ import models
 
 def main():
     env_name = 'BreakoutNoFrameskip-v4'
-    env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=True, clip_rewards=True, frame_stack=True, scale=True)
+    env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=False, clip_rewards=False, frame_stack=True, scale=True)
     output_size = env.action_space.n
     input_shape = env.observation_space.shape
 
