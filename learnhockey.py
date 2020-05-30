@@ -244,12 +244,12 @@ def main():
         name = 'hoc_long'
         #trainpool(sess, name, 2, 5000000, 512)
 
-        model = create_model(sess, 'hoc_long-2')
+        model = create_model(sess, 'hoc-0')
         #model2 = create_model(sess, 'hoc_long-1')
         #train(sess, model, 24, 100000000, 256)
         #traintwo(sess, model, model2, 32, 5000000, 256)
-        #run_only(sess, model, savenum=0, model2=None)
-        save_path = f'models/{model.name}/1/model.ckpt'
+        #run_only(sess, model, savenum=4, model2=None)
+        save_path = f'models/{model.name}/4/model.ckpt'
         load_model(sess, model, save_path)
         save_session('result.txt', sess)
 

@@ -6,7 +6,7 @@ import actiontype
 from running_std import RunningMeanStd
 
 class RND(PPO):
-    def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, \
+    def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, value_in_network, \
             value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, \
                 gamma_in=0.99, coef_in=0.5):
         self.gamma_in = gamma_in
@@ -17,6 +17,7 @@ class RND(PPO):
         self.reward_in_rms = RunningMeanStd(sess, scope="cumulative_reward_in")
         self.cumulative_reward_in = None
         self.state_rms = state_rms
+        self.value_in = tf.layers.dense(value_in_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         super().__init__(sess, state, network, action_type, action_size, value_network, name, learning_rate, beta, beta2, gamma, epsilon, lamda, max_grad_norm, epochs, minibatch_size)
 
     def make_summary(self):
@@ -36,10 +37,8 @@ class RND(PPO):
 
         if value_network == None:
             self.value = tf.layers.dense(network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
-            self.value_in = tf.layers.dense(network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         else:
             self.value = tf.layers.dense(value_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
-            self.value_in = tf.layers.dense(value_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         self.value = self.value[:, 0]
         self.value_in = self.value_in[:, 0]
 
