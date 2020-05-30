@@ -1,17 +1,17 @@
 import tensorflow as tf
 import os
 import numpy as np
+from gym.spaces import Box
 import time
 import math
 
 class Runner:
-    def __init__(self, env, update_interval, clip=False):
+    def __init__(self, env, update_interval):
         self.env = env
         self.update_interval = update_interval
-        self.clip = clip
         self.state = env.reset()
         self.total_reward = 0
-        
+        self.clip = isinstance(env.action_space, Box)
         self.avg = 0
         self.high = -1000000
         self.cnt = 0
@@ -75,7 +75,7 @@ class Runner:
             reward_sum += reward
             if done:
                 break
-            time.sleep(0.016)
+            time.sleep(0.008)
         self.state = self.env.reset()
         self.total_reward = 0
         return reward_sum

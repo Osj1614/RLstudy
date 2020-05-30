@@ -10,11 +10,11 @@ import models
 from running_std import RunningMeanStd
 
 def main():
-    run = False
+    run = True
     state = 2
-    env_name = 'HumanoidBulletEnv-v0'
+    env_name = 'HumanoidFlagrunHarderBulletEnv-v0'
     if state == 0:
-        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=False, clip_rewards=False, frame_stack=True, scale=True)
+        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=True, clip_rewards=True, frame_stack=True, scale=True)
     else:    
         env = gym.make(env_name)
     if isinstance(env.action_space, Box):
@@ -23,21 +23,22 @@ def main():
         output_size = env.action_space.n
 
     with tf.Session() as sess:
-        name = 'humanoid_rnd2'
+        name = 'flagrun_rnd'
         with tf.variable_scope(name):
             input = tf.placeholder(tf.float32, [None, *env.observation_space.shape])
             state_rms = RunningMeanStd(sess, shape=env.observation_space.shape)
-            norm_input = tf.clip_by_value((input - state_rms._mean) / tf.sqrt(state_rms._var), -10, 10)
+            norm_input = tf.clip_by_value((input - state_rms._mean) / tf.sqrt(state_rms._var), -5, 5)
 
             if state == 0:
                 with tf.variable_scope('policy'):
                     network = models.nature_cnn(input)
+                norm_input = norm_input[:,:,:,0]
                 with tf.variable_scope('target'):
                     target_net = models.add_dense(models.nature_cnn(norm_input), 256, name='dense1')
                 with tf.variable_scope('predict'):
                     predict_net = models.add_dense(models.nature_cnn(norm_input), 256, name='dense1')
                 model = RND(sess, input, state_rms, network, actiontype.Discrete, output_size, target_net, predict_net,\
-                     learning_rate=lambda f : 2.5e-4*(1-f), epochs=4, minibatch_size=4, beta2=0.01, name=name)
+                     gamma=0.999, learning_rate=lambda f : 0.0001, epochs=4, minibatch_size=4, beta2=0.01, name=name)
             else:
                 with tf.variable_scope('policy'):
                     network = models.mlp(input)
@@ -48,7 +49,7 @@ def main():
 
                 if state == 1:
                     model = RND(sess, input, state_rms, network, actiontype.Discrete, output_size, target_net, predict_net, epochs=4, minibatch_size=8, gamma=0.99, beta2=0.01, epsilon=0.1,\
-                        learning_rate=lambda f : 2.5e-4 * (1-f), name=name)
+                        coef_in=0.5, learning_rate=0.0001, name=name)
                 elif state == 2:
                     with tf.variable_scope('value'):
                         value_net = models.mlp(input)
@@ -60,7 +61,7 @@ def main():
             if state == 0:
                 train(sess, model, env_name, 10000000, 256, num_envs=16, atari=True)
             elif state == 1:
-                train(sess, model, env_name, 100000, 128, num_envs=8)
+                train(sess, model, env_name, 1000000, 128, num_envs=16)
             elif state == 2:
                 train(sess, model, env_name, 100000000, 2048, num_envs=32, log_interval=5)
         env.close()

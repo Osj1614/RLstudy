@@ -13,14 +13,17 @@ class RND(PPO):
         self.coef_in = coef_in
         self.target_network = target_network
         self.predictor_network = predictor_network
-        self.reward_in = tf.reduce_mean(tf.square(self.predictor_network - self.target_network), axis=-1)
+        self.reward_in = tf.reduce_sum(tf.square(self.predictor_network - self.target_network), axis=-1)
         self.reward_in_rms = RunningMeanStd(sess, scope="cumulative_reward_in")
+        self.cumulative_reward_in = None
         self.state_rms = state_rms
         super().__init__(sess, state, network, action_type, action_size, value_network, name, learning_rate, beta, beta2, gamma, epsilon, lamda, max_grad_norm, epochs, minibatch_size)
 
     def make_summary(self):
         super().make_summary()
         tf.summary.scalar('critic_in_loss', self.critic_in_loss)
+        tf.summary.scalar('value_in', tf.reduce_mean(self.value_in))
+        tf.summary.scalar('rnd_loss', self.rnd_loss)
         tf.summary.scalar('intrinsic_reward', tf.reduce_mean(self.reward_in))
 
     def bulid_train(self, network, value_network=None):
@@ -59,10 +62,10 @@ class RND(PPO):
             self.critic_in_loss = tf.reduce_mean(tf.squared_difference(self.returns_in, self.value_in)) * 0.5
             
         with tf.variable_scope('RND_loss'):
-            self.rndloss = tf.reduce_mean(tf.square(tf.stop_gradient(self.target_network) - self.predictor_network))
+            self.rnd_loss = tf.reduce_mean(tf.square(tf.stop_gradient(self.target_network) - self.predictor_network))
         
         with tf.variable_scope('Total_loss'):
-            self.loss =  self.actor_loss - self.entropy * self.beta2 + (self.critic_loss + self.critic_in_loss) * self.beta + self.rndloss
+            self.loss =  self.actor_loss - self.entropy * self.beta2 + (self.critic_loss + self.critic_in_loss) * self.beta + self.rnd_loss
         
         params = tf.trainable_variables(self.name)
         with tf.variable_scope('train'):
@@ -105,15 +108,28 @@ class RND(PPO):
 
         if not isinstance(self.cumulative_reward, list) or len(self.cumulative_reward) != len(batch_lst):
             self.cumulative_reward = [0 for _ in range(len(batch_lst))]
+        if not isinstance(self.cumulative_reward_in, list) or len(self.cumulative_reward_in) != len(batch_lst):
+            self.cumulative_reward_in = [0 for _ in range(len(batch_lst))]
+
+        r_in_lsts = list()
+        value_in_lsts = list()
 
         for i in range(len(batch_lst)):
+            r_in_lst, value_in_lst = self.get_intrinsic(batch_lst[i][0])
+            r_in_lst = r_in_lst[1:]
+            r_in_lsts.append(r_in_lst)
+            value_in_lsts.append(value_in_lst)
+
             size = len(batch_lst[i][1])
             cumulative_lst = np.zeros([size])
+            cumulative_in_lst = np.zeros([size])
             for j in range(size):
+                self.cumulative_reward_in[i] = r_in_lst[j] + self.cumulative_reward_in[i] * self.gamma_in
                 self.cumulative_reward[i] = batch_lst[i][2][j] + self.cumulative_reward[i] * self.gamma
                 cumulative_lst[j] = self.cumulative_reward[i]
+                cumulative_in_lst[j] = self.cumulative_reward_in[i]
                 self.cumulative_reward[i] *= batch_lst[i][3][j]
-
+            self.reward_in_rms.update(cumulative_in_lst)
             self.reward_rms.update(cumulative_lst)
             self.state_rms.update(batch_lst[i][0])
         
@@ -124,15 +140,14 @@ class RND(PPO):
         value_lsts = np.empty([0])
         returns_lsts = np.empty([0])
         returns_in_lsts = np.empty([0])
+        i = 0
         for batch in batch_lst:
-            s_lst = np.asarray(batch[0])
-            value_lst = self.get_value(s_lst)
-            r_in_lst, value_in_lst = self.get_intrinsic(s_lst)
-            r_in_lst = r_in_lst[:-1]
-            self.reward_in_rms.update(r_in_lst)
+            value_in_lst = value_in_lsts[i]
+            r_in_lst = r_in_lsts[i]
             r_in_lst /= math.sqrt(self.reward_in_rms.var)
             r_in_lst =  np.clip(r_in_lst, -5 ,5)
-
+            s_lst = np.asarray(batch[0])
+            value_lst = self.get_value(s_lst)
             s_lst = s_lst[:-1]
             if self.action_type == actiontype.Discrete:
                 a_lst = np.asarray(batch[1], dtype=np.int32)
@@ -150,20 +165,22 @@ class RND(PPO):
             advantage_lst = self.calc_gae(r_lst, value_lst, done_lst)
             value_lst = value_lst[:-1]
             returns_lst = value_lst + advantage_lst
-            advantage_lst = (advantage_lst - advantage_lst.mean()) / (advantage_lst.std() + 1e-8)
 
             advantage_in_lst = self.calc_gae(r_in_lst, value_in_lst, np.ones_like(done_lst), self.gamma_in)
             value_in_lst = value_in_lst[:-1]
             returns_in_lst = value_in_lst + advantage_in_lst
-            advantage_in_lst = (advantage_in_lst - advantage_in_lst.mean()) / (advantage_in_lst.std() + 1e-8)
+
+            advantage_lst = advantage_lst+advantage_in_lst*self.coef_in
+            advantage_lst = (advantage_lst - advantage_lst.mean()) / (advantage_lst.std() + 1e-8)
 
             s_lsts = np.concatenate((s_lsts, s_lst), axis=0)
             a_lsts = np.concatenate((a_lsts, a_lst), axis=0)
             value_lsts = np.concatenate((value_lsts, value_lst), axis=0)
             action_prob_lsts = np.concatenate((action_prob_lsts, action_prob_lst), axis=0)
-            advantage_lsts = np.concatenate((advantage_lsts, advantage_lst+advantage_in_lst*self.coef_in), axis=0)
+            advantage_lsts = np.concatenate((advantage_lsts, advantage_lst), axis=0)
             returns_lsts = np.concatenate((returns_lsts, returns_lst), axis=0)
             returns_in_lsts = np.concatenate((returns_in_lsts, returns_in_lst), axis=0)
+            i += 1
 
         self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, returns_in_lsts, learning_rate)
 

@@ -37,7 +37,7 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
     currstep = sess.run(global_step)
     
     if num_envs == 1:
-        runner = Runner(gym.make(env_name), update_interval, clip=True)
+        runner = Runner(gym.make(env_name), update_interval)
     else:
         runner = ProcRunner(env_name, num_envs, update_interval, atari=atari)
 
@@ -92,7 +92,7 @@ def run_only(sess, model, env, render=True):
     load_model(sess, model, save_path)
     total_reward = 0
     env.render()
-    runner = Runner(env, 0, True)
+    runner = Runner(env, 0)
     avg = 0
     high = -1000
     for i in range(100):
