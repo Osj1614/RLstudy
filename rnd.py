@@ -25,7 +25,7 @@ class RND(PPO):
         tf.summary.scalar('critic_in_loss', self.critic_in_loss)
         tf.summary.scalar('value_in', tf.reduce_mean(self.value_in))
         tf.summary.scalar('rnd_loss', self.rnd_loss)
-        tf.summary.scalar('intrinsic_reward', tf.reduce_mean(self.reward_in))
+        tf.summary.scalar('intrinsic_reward', tf.reduce_mean(self.reward_in) / tf.sqrt(self.reward_in_rms._var))
 
     def bulid_train(self, network, value_network=None):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
@@ -144,7 +144,7 @@ class RND(PPO):
             value_in_lst = value_in_lsts[i]
             r_in_lst = r_in_lsts[i]
             r_in_lst /= math.sqrt(self.reward_in_rms.var)
-            r_in_lst =  np.clip(r_in_lst, -5 ,5)
+            r_in_lst =  np.clip(r_in_lst, 0 ,5)
             s_lst = np.asarray(batch[0])
             value_lst = self.get_value(s_lst)
             s_lst = s_lst[:-1]
