@@ -19,10 +19,14 @@ class PPO:
         self.lamda = lamda
         self.max_grad_norm = max_grad_norm
         self.epochs = epochs
-        self.minibatch_size=  minibatch_size
+        self.minibatch_size = minibatch_size
         self.cumulative_reward = 0
 
         with tf.variable_scope("ppo"):
+            self.global_step = tf.Variable(initial_value=0, dtype=tf.int32, trainable=False, name="global_step")
+            self.step_size = tf.placeholder(tf.int32)
+            self.increment_global_step = tf.assign_add(self.global_step, self.step_size, name = 'increment_global_step')
+
             if action_type == actiontype.Continuous:
                 self.action = actiontype.continuous(network, action_size)
                 self.actions = tf.placeholder(tf.float32, [None, self.action_size], name="Action")
@@ -34,6 +38,7 @@ class PPO:
             self.sample = self.action.sample()
             self.neglogp = self.action.neglogp(self.sample)
             self.bulid_train(network, value_network)
+            self.make_summary()
         
     def bulid_train(self, network, value_network=None):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
@@ -83,6 +88,8 @@ class PPO:
         tf.summary.scalar('value', tf.reduce_mean(self.value))
         tf.summary.scalar('clip_fraction', self.clipfrac)
         tf.summary.scalar('learning_rate', self.lr)
+
+        self.summaries = tf.summary.merge_all()
         
     def get_value(self, state):
         feed_dict = {self.state : state}
@@ -126,9 +133,11 @@ class PPO:
             advantage_lst[i] = cur = self.lamda * gamma * done_lst[i] * cur + delta
         return advantage_lst
 
-    def train_batches(self, batch_lst, learning_rate=None, summaries=None):
+    def train_batches(self, batch_lst, learning_rate=None, writer=None):
         if learning_rate == None:
             learning_rate = self.learning_rate
+
+        curr_step = self.sess.run(self.global_step)
 
         if not isinstance(self.cumulative_reward, list) or len(self.cumulative_reward) != len(batch_lst):
             self.cumulative_reward = [0 for _ in range(len(batch_lst))]
@@ -177,8 +186,12 @@ class PPO:
             returns_lsts = np.concatenate((returns_lsts, returns_lst), axis=0)
 
         self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, learning_rate)
-        if summaries != None:
-            return self.sess.run(summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
+        
+        self.sess.run(self.increment_global_step, feed_dict={self.step_size : len(s_lsts)})
+
+        if writer != None:
+            summary_data = self.sess.run(self.summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
                 self.prevneglogp:action_prob_lsts, self.old_value:value_lsts, self.state : s_lsts, self.lr : learning_rate})
+            writer.add_summary(summary_data, curr_step)
         
        

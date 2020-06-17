@@ -23,18 +23,12 @@ def load_model(sess, model, save_path):
     return saver
 
 def train(sess, model, env_name, num_steps, update_interval, log_interval=10, save_interval=50, num_envs=1, atari=False):
-    model.make_summary()
-
-    summaries = tf.summary.merge_all()
     writer = tf.summary.FileWriter("./logs/" + model.name, sess.graph)
-    with tf.variable_scope(model.name):
-        global_step = tf.Variable(initial_value=0, trainable=False, name="global_step")
-        increment_global_step = tf.assign_add(global_step, update_interval*num_envs, name = 'increment_global_step')
     save_path = "models/" + model.name + "/model.ckpt"
     sess.run(tf.global_variables_initializer())
     saver = load_model(sess, model, save_path)
 
-    currstep = sess.run(global_step)
+    currstep = sess.run(model.global_step)
     
     if num_envs == 1:
         runner = Runner(gym.make(env_name), update_interval)
@@ -45,7 +39,6 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
     curr_iter = currstep // (update_interval * num_envs)
     prevtime = time.time()
     for i in range(curr_iter, total_iter+1):
-        sess.run(increment_global_step)
         currstep += update_interval * num_envs
 
         batches = runner.run_steps(model, currstep)
@@ -61,9 +54,9 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
             print(f"time left:\t{round(time_passed*(total_iter-i)/log_interval/3600, 3)} hour")
             prevtime = currtime
             if high != -100000:
-                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score", simple_value=avg)])
+                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag=f"{model.name}/score", simple_value=avg)])
                 writer.add_summary(score_summary_data, currstep)
-                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag="score_high", simple_value=high)])
+                score_summary_data = tf.Summary(value=[tf.Summary.Value(tag=f"{model.name}/score_high", simple_value=high)])
                 writer.add_summary(score_summary_data, currstep)
             print('-----------------------------------------------------------')
 
@@ -74,9 +67,8 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
             lr = model.learning_rate
         if lr <= 1e-8:
             lr = 1e-8
-        summary_data = model.train_batches(batches, lr, summaries)
-        if summary_data != None:
-            writer.add_summary(summary_data, currstep)
+
+        model.train_batches(batches, lr, writer)
 
         if (i+1) % save_interval == 0:
             saver.save(sess, save_path)

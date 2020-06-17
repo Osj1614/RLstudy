@@ -8,24 +8,26 @@ from running_std import RunningMeanStd
 class RND(PPO):
     def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, value_in_network, \
             value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, \
-                gamma_in=0.99, coef_in=0.5):
+                gamma_in=0.99, coef_in=0.5, rnd_lr=0.00025, init_runs=100):
         self.gamma_in = gamma_in
+        self.rnd_lr = rnd_lr
         self.coef_in = coef_in
         self.target_network = target_network
         self.predictor_network = predictor_network
-        self.reward_in = tf.reduce_sum(tf.square(self.predictor_network - self.target_network), axis=-1)
+        self.reward_in = tf.reduce_mean(tf.square(self.predictor_network - self.target_network), axis=-1)
         self.reward_in_rms = RunningMeanStd(sess, scope="cumulative_reward_in")
         self.cumulative_reward_in = None
         self.state_rms = state_rms
+        self.rnd_lr = rnd_lr
         self.value_in = tf.layers.dense(value_in_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         super().__init__(sess, state, network, action_type, action_size, value_network, name, learning_rate, beta, beta2, gamma, epsilon, lamda, max_grad_norm, epochs, minibatch_size)
 
     def make_summary(self):
-        super().make_summary()
         tf.summary.scalar('critic_in_loss', self.critic_in_loss)
         tf.summary.scalar('value_in', tf.reduce_mean(self.value_in))
         tf.summary.scalar('rnd_loss', self.rnd_loss)
         tf.summary.scalar('intrinsic_reward', tf.reduce_mean(self.reward_in) / tf.sqrt(self.reward_in_rms._var))
+        super().make_summary()
 
     def bulid_train(self, network, value_network=None):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
@@ -64,7 +66,7 @@ class RND(PPO):
             self.rnd_loss = tf.reduce_mean(tf.square(tf.stop_gradient(self.target_network) - self.predictor_network))
         
         with tf.variable_scope('Total_loss'):
-            self.loss =  self.actor_loss - self.entropy * self.beta2 + (self.critic_loss + self.critic_in_loss) * self.beta + self.rnd_loss
+            self.loss =  self.actor_loss - self.entropy * self.beta2 + (self.critic_loss + self.critic_in_loss) * self.beta
         
         params = tf.trainable_variables(self.name)
         with tf.variable_scope('train'):
@@ -75,6 +77,9 @@ class RND(PPO):
                 grads, _ = tf.clip_by_global_norm(grads, self.max_grad_norm)
             grads_and_var = list(zip(grads, var))
             self.train = trainer.apply_gradients(grads_and_var)
+
+        with tf.variable_scope('train_rnd'):
+            self.train_rnd = tf.train.AdamOptimizer(learning_rate=self.rnd_lr).minimize(self.rnd_loss)
 
     def get_actions(self, states):
         a, ap = self.sess.run([self.sample, self.neglogp], feed_dict={self.state : states})
@@ -95,31 +100,33 @@ class RND(PPO):
                     ind = order[i:end]
                     slices = (arr[ind] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, returns_in_lst))
                     self.run_train(*slices, learning_rate)
+        self.run_train_rnd(s_lst)
 
     def run_train(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, returns_in_lst, learning_rate):
         self.sess.run(self.train, feed_dict={self.returns:returns_lst, \
             self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
             self.actions:a_lst, self.state : s_lst, self.returns_in : returns_in_lst, self.lr : learning_rate})
 
-    def train_batches(self, batch_lst, learning_rate=None, summaries=None):
-        if learning_rate == None:
-            learning_rate = self.learning_rate
+    def run_train_rnd(self, s_lst):
+        for i in range(0, len(s_lst), self.minibatch_size):
+            end = i + self.minibatch_size
+            self.sess.run(self.train_rnd, feed_dict={self.state : s_lst[i:end]})
 
+    def update_rms(self, batch_lst):
         if not isinstance(self.cumulative_reward, list) or len(self.cumulative_reward) != len(batch_lst):
             self.cumulative_reward = [0 for _ in range(len(batch_lst))]
         if not isinstance(self.cumulative_reward_in, list) or len(self.cumulative_reward_in) != len(batch_lst):
             self.cumulative_reward_in = [0 for _ in range(len(batch_lst))]
-
+            
         r_in_lsts = list()
         value_in_lsts = list()
 
         for i in range(len(batch_lst)):
+            size = len(batch_lst[i][1])
             r_in_lst, value_in_lst = self.get_intrinsic(batch_lst[i][0])
             r_in_lst = r_in_lst[1:]
             r_in_lsts.append(r_in_lst)
             value_in_lsts.append(value_in_lst)
-
-            size = len(batch_lst[i][1])
             cumulative_lst = np.zeros([size])
             cumulative_in_lst = np.zeros([size])
             for j in range(size):
@@ -131,7 +138,22 @@ class RND(PPO):
             self.reward_in_rms.update(cumulative_in_lst)
             self.reward_rms.update(cumulative_lst)
             self.state_rms.update(batch_lst[i][0])
-        
+        return r_in_lsts, value_in_lsts
+
+    def train_batches(self, batch_lst, learning_rate=None, writer=None):
+        if learning_rate == None:
+            learning_rate = self.learning_rate
+
+        curr_step = self.sess.run(self.global_step)
+
+        if curr_step < 10000:
+            for batch in batch_lst:
+                self.run_train_rnd(batch[0])
+            self.sess.run(self.increment_global_step, feed_dict={self.step_size : len(batch_lst) * len(batch_lst[0][1])})
+            return
+
+        r_in_lsts, value_in_lsts = self.update_rms(batch_lst)
+
         s_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][0][0])])
         a_lsts = np.empty(shape=[0, *np.shape(batch_lst[0][1][0])])
         advantage_lsts = np.empty([0])
@@ -182,9 +204,12 @@ class RND(PPO):
             i += 1
 
         self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, returns_in_lsts, learning_rate)
+        
+        self.sess.run(self.increment_global_step, feed_dict={self.step_size : len(s_lsts)})
 
-        if summaries != None:
-            return self.sess.run(summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
+        if writer != None:
+            summary_data = self.sess.run(self.summaries, feed_dict={self.returns:returns_lsts, self.actions:a_lsts, self.advantage:advantage_lsts, \
                 self.prevneglogp:action_prob_lsts, self.old_value:value_lsts, self.state : s_lsts, self.returns_in : returns_in_lsts, self.lr : learning_rate})
+            writer.add_summary(summary_data, curr_step)
         
        
