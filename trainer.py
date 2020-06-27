@@ -24,7 +24,6 @@ def load_model(sess, model, save_path):
     return saver
 
 def train(sess, model, env_name, num_steps, log_interval=10, save_interval=50, atari=False):
-    writer = tf.summary.FileWriter("./logs/" + model.name, sess.graph)
     save_path = "models/" + model.name + "/model.ckpt"
     sess.run(tf.global_variables_initializer())
     saver = load_model(sess, model, save_path)
@@ -56,11 +55,11 @@ def train(sess, model, env_name, num_steps, log_interval=10, save_interval=50, a
             print(f"elapsed time:\t{round(time_passed, 3)} second")
             print(f"time left:\t{round(time_passed*(total_iter-i)/log_interval/3600, 3)} hour")
             prevtime = currtime
-            if high != -100000:
+            if high != -100000 and model.writer != None:
                 score_summary_data = tf.Summary(value=[tf.Summary.Value(tag=f"{model.name}/score", simple_value=avg)])
-                writer.add_summary(score_summary_data, currstep)
+                model.writer.add_summary(score_summary_data, currstep)
                 score_summary_data = tf.Summary(value=[tf.Summary.Value(tag=f"{model.name}/score_high", simple_value=high)])
-                writer.add_summary(score_summary_data, currstep)
+                model.writer.add_summary(score_summary_data, currstep)
             print('-----------------------------------------------------------')
 
 
@@ -72,9 +71,9 @@ def train(sess, model, env_name, num_steps, log_interval=10, save_interval=50, a
             lr = 1e-8
 
         if model.network.recurrent:
-            model.train_batches(batches, lr, writer, hs)
+            model.train_batches(batches, lr, hs)
         else:
-            model.train_batches(batches, lr, writer)
+            model.train_batches(batches, lr)
 
         if (i+1) % save_interval == 0:
             saver.save(sess, save_path)

@@ -8,7 +8,7 @@ class ACnet:
     def __init__(self, obs_shape, policy_fn, nenvs, nsteps, minibatches, action_type, action_size, recurrent=False):
         with tf.variable_scope('network', reuse=tf.AUTO_REUSE):
             train_envs = nenvs // minibatches
-            self.train_obs = tf.placeholder(dtype=tf.float32, shape=(train_envs * nsteps,)+obs_shape, name="train_obs")
+            self.train_obs = tf.placeholder(dtype=tf.float32, shape=(nenvs * nsteps // minibatches,)+obs_shape, name="train_obs")
             self.act_obs = tf.placeholder(dtype=tf.float32, shape=(nenvs,)+obs_shape, name="act_obs")
             self.nenvs = nenvs
             self.nsteps = nsteps
@@ -17,23 +17,17 @@ class ACnet:
 
             if recurrent:
                 self.policy_network, _, self.state, self.mask, _ = policy_fn(self.train_obs, train_envs)
-            else:
-                self.policy_network = policy_fn(self.train_obs)
-            self.value = tf.layers.dense(self.policy_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
-            if action_type == actiontype.Continuous:
-                self.action = actiontype.continuous(self.policy_network, action_size)
-            else:
-                self.action = actiontype.discrete(self.policy_network, action_size)
-
-                
-            if recurrent:
                 self.act_network, self.next_state, self.act_state, self.act_mask, self.initial_state = policy_fn(self.act_obs, nenvs)
             else:
+                self.policy_network = policy_fn(self.train_obs)
                 self.act_network = policy_fn(self.act_obs)
+            self.value = tf.layers.dense(self.policy_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
             self.act_value = tf.layers.dense(self.act_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value")
             if action_type == actiontype.Continuous:
+                self.action = actiontype.continuous(self.policy_network, action_size)
                 self.act_action = actiontype.continuous(self.act_network, action_size)
             else:
+                self.action = actiontype.discrete(self.policy_network, action_size)
                 self.act_action = actiontype.discrete(self.act_network, action_size)
 
         self.act_value = self.act_value[:, 0]

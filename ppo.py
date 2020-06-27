@@ -5,7 +5,7 @@ import actiontype
 from running_std import RunningMeanStd
 
 class PPO:
-    def __init__(self, sess, network, name="", learning_rate=0.00025, beta=0.5, beta2=0.01,\
+    def __init__(self, sess, network, name="", learning_rate=0.00025, beta=0.5, ent_coef=0.01,\
          gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4):
         self.network = network
         self.obs = network.train_obs
@@ -13,7 +13,7 @@ class PPO:
         self.name = name
         self.learning_rate = learning_rate
         self.beta = beta
-        self.beta2 = beta2
+        self.ent_coef = ent_coef
         self.gamma = gamma
         self.epsilon = epsilon
         self.lamda = lamda
@@ -37,6 +37,7 @@ class PPO:
             self.neglogp = network.act_action.neglogp(self.sample)
             self.bulid_train()
             self.make_summary()
+        self.writer = tf.summary.FileWriter(f"./logs/{name}", sess.graph)
         
     def bulid_train(self):
         self.advantage = tf.placeholder(tf.float32, [None], name="Advantage")
@@ -61,7 +62,7 @@ class PPO:
             self.vclipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(self.value - self.old_value), self.epsilon)))
             self.critic_loss = tf.reduce_mean(tf.maximum(critic_loss1, critic_loss2)) * 0.5
         with tf.variable_scope('Total_loss'):
-            self.loss =  self.actor_loss - self.entropy * self.beta2 + self.critic_loss * self.beta
+            self.loss =  self.actor_loss - self.entropy * self.ent_coef + self.critic_loss * self.beta
         
         params = tf.trainable_variables(self.name)
         with tf.variable_scope('train'):
@@ -78,7 +79,7 @@ class PPO:
         tf.summary.scalar('actor_loss', self.actor_loss)
         tf.summary.scalar('critic_loss', self.critic_loss)
         tf.summary.scalar('entropy', self.entropy)
-        tf.summary.scalar('value', tf.reduce_mean(self.value))
+        tf.summary.scalar('value', tf.reduce_mean(self.value) * tf.sqrt(self.reward_rms._var))
         tf.summary.scalar('clip_fraction', self.clipfrac)
         tf.summary.scalar('learning_rate', self.lr)
 
@@ -118,23 +119,23 @@ class PPO:
 
     def run_trains(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, learning_rate, hs_lst=None, m_lst=None):
         end = 0
-        size = len(returns_lst)
+        size = self.network.nenvs * self.network.nsteps
         order = np.arange(size)
         minibatch_size = size // self.network.minibatches
         if not self.network.recurrent:
-            for _ in range(self.epochs):
+            for e in range(self.epochs):
                 np.random.shuffle(order)
                 for i in range(0, size, minibatch_size):
                     end = i + minibatch_size
-                    if end <= size:
-                        ind = order[i:end]
-                        slices = (arr[ind] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst))
-                        self.run_train(*slices, None, learning_rate, None)
+                    ind = order[i:end]
+                    slices = (arr[ind] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst))
+                    islast = e==self.epochs-1 and i==size-minibatch_size
+                    self.run_train(*slices, None, learning_rate, None, islast)
         else:
             envsperbatch = self.network.nenvs // self.network.minibatches
             envinds = np.arange(self.network.nenvs)
             flatinds = np.arange(self.network.nenvs * self.network.nsteps).reshape(self.network.nenvs, self.network.nsteps)
-            for _ in range(self.epochs):
+            for e in range(self.epochs):
                 np.random.shuffle(envinds)
                 for i in range(0, self.network.nenvs, envsperbatch):
                     end = i + envsperbatch
@@ -142,18 +143,22 @@ class PPO:
                     mbflatinds = flatinds[mbenvinds].ravel()
                     slices = (arr[mbflatinds] for arr in (s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, m_lst))
                     hstates = hs_lst[mbenvinds]
-                    self.run_train(*slices, learning_rate, hstates)
+                    islast = e==self.epochs-1 and i==self.network.nenvs-envsperbatch
+                    self.run_train(*slices, learning_rate, hstates, islast)
                     
 
-    def run_train(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, m_lst, learning_rate, hs_lst):
+    def run_train(self, s_lst, a_lst, returns_lst, advantage_lst, action_prob_lst, value_lst, m_lst, learning_rate, hs_lst, log=False):
+        feed = {self.returns:returns_lst, \
+                self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
+                self.actions:a_lst, self.obs : s_lst, self.lr : learning_rate}
         if self.network.recurrent:
-            self.sess.run(self.train, feed_dict={self.returns:returns_lst, \
-                self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
-                self.actions:a_lst, self.obs : s_lst, self.network.mask : m_lst, self.lr : learning_rate, self.network.state : hs_lst})
+            feed[self.network.mask] = m_lst
+            feed[self.network.state] = hs_lst
+        if log and self.writer != None:
+            _, summary = self.sess.run([self.train, self.summaries], feed_dict=feed)
+            self.writer.add_summary(summary, self.sess.run(self.global_step))
         else:
-            self.sess.run(self.train, feed_dict={self.returns:returns_lst, \
-                self.advantage:advantage_lst, self.prevneglogp:action_prob_lst, self.old_value:value_lst, \
-                self.actions:a_lst, self.obs : s_lst, self.lr : learning_rate})
+            self.sess.run(self.train, feed_dict=feed)
 
     def calc_gae(self, r_lst, value_lst, done_lst, gamma=None):
         if gamma == None:
@@ -162,11 +167,11 @@ class PPO:
         size = len(r_lst)
         advantage_lst = np.zeros(size)
         for i in reversed(range(size)):
-            delta = r_lst[i] + gamma * value_lst[i+1] * (1-done_lst[i]) - value_lst[i]
-            advantage_lst[i] = cur = self.lamda * gamma * (1-done_lst[i]) * cur + delta
+            delta = r_lst[i] + gamma * value_lst[i+1] * (1-done_lst[i+1]) - value_lst[i]
+            advantage_lst[i] = cur = self.lamda * gamma * (1-done_lst[i+1]) * cur + delta
         return advantage_lst
 
-    def train_batches(self, batch_lst, learning_rate=None, writer=None, hs_lst=None):
+    def train_batches(self, batch_lst, learning_rate=None, hs_lst=None):
         if learning_rate == None:
             learning_rate = self.learning_rate
 
@@ -218,7 +223,7 @@ class PPO:
             advantage_lsts = np.concatenate((advantage_lsts, advantage_lst), axis=0)
             returns_lsts = np.concatenate((returns_lsts, returns_lst), axis=0)
             if self.network.recurrent:
-                m_lst = np.concatenate((m_lst, done_lst), axis=0)
+                m_lst = np.concatenate((m_lst, done_lst[:-1]), axis=0)
 
         if self.network.recurrent:
             self.run_trains(s_lsts, a_lsts, returns_lsts, advantage_lsts, action_prob_lsts, value_lsts, learning_rate, hs_lst, m_lst)

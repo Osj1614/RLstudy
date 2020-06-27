@@ -39,15 +39,15 @@ class ProcRunner:
         for w in self.workers:
             w.start()
         self.states = list()
+        self.pdone = list()
         self.total_reward = [0 for _ in range(self.nenvs)]
         for p in self.p_pipe:
             s, _, _ = p.recv()
             self.states.append(s)
+            self.pdone.append(0)
+        
         if self.model.network.recurrent:
             self.hs = self.model.network.initial_state
-            self.pdone = list()
-            for _ in range(self.nenvs):
-                self.pdone.append(0)
                 
         self.avg = 0
         self.high = -1000000
@@ -88,10 +88,9 @@ class ProcRunner:
                 a_lst[i].append(action[i])
                 r_lst[i].append(reward)
                 action_prob_lst[i].append(action_prob[i])
-                done_lst[i].append(1 if done else 0)
+                done_lst[i].append(self.pdone[i])
                 v_lst[i].append(values[i])
-                if self.model.network.recurrent:
-                    self.pdone[i] = 1 if done else 0
+                self.pdone[i] = 1 if done else 0
                 self.states[i] = ns
                 if done:
                     self.avg += self.total_reward[i]
@@ -107,6 +106,7 @@ class ProcRunner:
             values = self.model.get_value(self.states)
         for i in range(self.nenvs):
             v_lst[i].append(values[i])
+            done_lst[i].append(self.pdone[i])
         batches = [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], action_prob_lst[i], v_lst[i]] for i in range(self.nenvs)]
         if self.model.network.recurrent:
             return batches, prev_hs
