@@ -30,19 +30,25 @@ def worker(env_name, pipe, atari=False):
 
 
 class ProcRunner:
-    def __init__(self, env_name, env_count, update_interval, atari=False):
-        self.update_interval = update_interval
-        self.env_count = env_count
-        self.p_pipe, c_pipe = zip(*[Pipe() for _ in range(env_count)])
-        self.workers = [Process(target=worker, args=(env_name, c_pipe[i], atari), daemon=True) for i in range(env_count)]
+    def __init__(self, model, env_name, atari=False):
+        self.update_interval = model.network.nsteps
+        self.model = model
+        self.nenvs = model.network.nenvs
+        self.p_pipe, c_pipe = zip(*[Pipe() for _ in range(self.nenvs)])
+        self.workers = [Process(target=worker, args=(env_name, c_pipe[i], atari), daemon=True) for i in range(self.nenvs)]
         for w in self.workers:
             w.start()
         self.states = list()
-        self.total_reward = [0 for _ in range(env_count)]
+        self.total_reward = [0 for _ in range(self.nenvs)]
         for p in self.p_pipe:
             s, _, _ = p.recv()
             self.states.append(s)
-
+        if self.model.network.recurrent:
+            self.hs = self.model.network.initial_state
+            self.pdone = list()
+            for _ in range(self.nenvs):
+                self.pdone.append(0)
+                
         self.avg = 0
         self.high = -1000000
         self.cnt = 0
@@ -57,28 +63,35 @@ class ProcRunner:
         return avg, high
         
 
-    def run_steps(self, model, currstep=0):
-        s_lst = [list() for _ in range(self.env_count)]
-        a_lst = [list() for _ in range(self.env_count)]
-        r_lst = [list() for _ in range(self.env_count)]
-        done_lst = [list() for _ in range(self.env_count)]
-        v_lst = [list() for _ in range(self.env_count)]
-        action_prob_lst = [list() for _ in range(self.env_count)]
-
+    def run_steps(self, currstep=0):
+        s_lst = [list() for _ in range(self.nenvs)]
+        a_lst = [list() for _ in range(self.nenvs)]
+        r_lst = [list() for _ in range(self.nenvs)]
+        done_lst = [list() for _ in range(self.nenvs)]
+        v_lst = [list() for _ in range(self.nenvs)]
+        action_prob_lst = [list() for _ in range(self.nenvs)]
+        if self.model.network.recurrent:
+            prev_hs = np.copy(self.hs)
         for _ in range(self.update_interval):
             currstep += 1
-            action, action_prob = model.get_actions(self.states)
-            for i in range(self.env_count):
+            if self.model.network.recurrent:
+                action, action_prob, values, self.hs = self.model.get_actions(self.states, self.hs, self.pdone)
+            else:
+                action, action_prob, values = self.model.get_actions(self.states)
+            for i in range(self.nenvs):
                 self.p_pipe[i].send(('step',action[i]))
 
-            for i in range(self.env_count):
+            for i in range(self.nenvs):
                 ns, reward, done = self.p_pipe[i].recv()
                 self.total_reward[i] += reward
                 s_lst[i].append(np.copy(self.states[i]))
                 a_lst[i].append(action[i])
                 r_lst[i].append(reward)
                 action_prob_lst[i].append(action_prob[i])
-                done_lst[i].append(0 if done else 1)
+                done_lst[i].append(1 if done else 0)
+                v_lst[i].append(values[i])
+                if self.model.network.recurrent:
+                    self.pdone[i] = 1 if done else 0
                 self.states[i] = ns
                 if done:
                     self.avg += self.total_reward[i]
@@ -87,10 +100,18 @@ class ProcRunner:
                         self.high = self.total_reward[i]
                     self.total_reward[i] = 0
                     i += 1
-        for i in range(self.env_count):
-            s_lst[i].append(self.states[i])
 
-        return [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], action_prob_lst[i]] for i in range(self.env_count)] 
+        if self.model.network.recurrent:
+            values = self.model.get_value(self.states, self.hs, self.pdone)
+        else:
+            values = self.model.get_value(self.states)
+        for i in range(self.nenvs):
+            v_lst[i].append(values[i])
+        batches = [[s_lst[i], a_lst[i], r_lst[i], done_lst[i], action_prob_lst[i], v_lst[i]] for i in range(self.nenvs)]
+        if self.model.network.recurrent:
+            return batches, prev_hs
+        else:
+            return batches
 
     def close(self):
         for p in self.p_pipe:

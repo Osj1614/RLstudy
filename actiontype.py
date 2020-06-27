@@ -19,6 +19,7 @@ class continuous(actiontype):
     def __init__(self, network, size):
         self.mean = tf.layers.dense(network, size, kernel_initializer=tf.orthogonal_initializer(), name="policy/mean")
         self.size = size
+        self.type = Continuous
         self.logstd = tf.get_variable(name='policy/logstd', shape=[1, self.size], initializer=tf.zeros_initializer())
         self.std = tf.exp(self.logstd)
     
@@ -35,6 +36,7 @@ class discrete(actiontype):
     def __init__(self, network, size):
         self.policy = tf.layers.dense(network, size, kernel_initializer=tf.orthogonal_initializer(), name="policy")
         self.size = size
+        self.type = Discrete
 
     def neglogp(self, x):
         return tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.policy, labels=tf.one_hot(x, self.size))
@@ -49,3 +51,4 @@ class discrete(actiontype):
     def sample(self):
         u = tf.random_uniform(tf.shape(self.policy), dtype=self.policy.dtype)
         return tf.argmax(self.policy - tf.log(-tf.log(u)), axis=-1)
+        #http://amid.fish/humble-gumbel

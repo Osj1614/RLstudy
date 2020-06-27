@@ -3,6 +3,7 @@ import tensorflow as tf
 import os
 import gym
 import time
+from gym.spaces import Box
 from runner import Runner
 from procrunner import ProcRunner
 
@@ -22,26 +23,28 @@ def load_model(sess, model, save_path):
 
     return saver
 
-def train(sess, model, env_name, num_steps, update_interval, log_interval=10, save_interval=50, num_envs=1, atari=False):
+def train(sess, model, env_name, num_steps, log_interval=10, save_interval=50, atari=False):
     writer = tf.summary.FileWriter("./logs/" + model.name, sess.graph)
     save_path = "models/" + model.name + "/model.ckpt"
     sess.run(tf.global_variables_initializer())
     saver = load_model(sess, model, save_path)
-
+    num_envs = model.network.nenvs
+    update_interval = model.network.nsteps
     currstep = sess.run(model.global_step)
-    
     if num_envs == 1:
-        runner = Runner(gym.make(env_name), update_interval)
+        runner = Runner(model, gym.make(env_name))
     else:
-        runner = ProcRunner(env_name, num_envs, update_interval, atari=atari)
+        runner = ProcRunner(model, env_name, atari=atari)
 
     total_iter = int(num_steps // (update_interval * num_envs))
     curr_iter = currstep // (update_interval * num_envs)
     prevtime = time.time()
     for i in range(curr_iter, total_iter+1):
         currstep += update_interval * num_envs
-
-        batches = runner.run_steps(model, currstep)
+        if model.network.recurrent:
+            batches, hs = runner.run_steps(currstep)
+        else:
+            batches = runner.run_steps(currstep)
         
         if (i+1) % log_interval == 0:
             avg, high = runner.get_avg_high()
@@ -68,7 +71,10 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
         if lr <= 1e-8:
             lr = 1e-8
 
-        model.train_batches(batches, lr, writer)
+        if model.network.recurrent:
+            model.train_batches(batches, lr, writer, hs)
+        else:
+            model.train_batches(batches, lr, writer)
 
         if (i+1) % save_interval == 0:
             saver.save(sess, save_path)
@@ -79,7 +85,7 @@ def train(sess, model, env_name, num_steps, update_interval, log_interval=10, sa
         runner.close()
     saver.save(sess, save_path)
 
-def run_only(sess, model, env, render=True):
+def run_only(sess, model, env, cnt=100, render=True):
     save_path = "models/" + model.name + "/model.ckpt"
     load_model(sess, model, save_path)
     total_reward = 0
@@ -87,8 +93,28 @@ def run_only(sess, model, env, render=True):
     runner = Runner(env, 0)
     avg = 0
     high = -1000
-    for i in range(100):
-        total_reward = runner.playgame(model, render=render)
+    clip = isinstance(env.action_space, Box)
+    for i in range(cnt):
+        s = env.reset()
+        hs = model.network.initial_state
+        total_reward = 0
+        while True:
+            if render:
+                env.render()
+            if model.recurrent:
+                action, hs = model.get_action(s, hs, False)
+            else:
+                action = model.get_action(s)
+
+            if clip:
+                ns, reward, done, _ = env.step(np.clip(action, env.action_space.low, env.action_space.high))
+            else:
+                ns, reward, done, _ = env.step(action)
+            s = ns
+            reward_sum += reward
+            if done:
+                break
+            time.sleep(0.008)
         print(total_reward)
         if total_reward > high:
             high = total_reward

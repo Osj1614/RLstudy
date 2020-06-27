@@ -8,7 +8,7 @@ from running_std import RunningMeanStd
 class RND(PPO):
     def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, value_in_network, \
             value_network=None, name="", learning_rate=0.00025, beta=0.5, beta2=0.01, gamma=0.99, epsilon=0.1, lamda=0.95, max_grad_norm=0.5, epochs=4, minibatch_size=16, \
-                gamma_in=0.99, coef_in=0.5, rnd_lr=0.00025, init_runs=100):
+                gamma_in=0.99, coef_in=0.5, rnd_lr=0.00025, init_runs=10000):
         self.gamma_in = gamma_in
         self.rnd_lr = rnd_lr
         self.coef_in = coef_in
@@ -19,6 +19,7 @@ class RND(PPO):
         self.cumulative_reward_in = None
         self.state_rms = state_rms
         self.rnd_lr = rnd_lr
+        self.init_runs = init_runs
         self.value_in = tf.layers.dense(value_in_network, 1, kernel_initializer=tf.orthogonal_initializer(), name="Value_in")
         super().__init__(sess, state, network, action_type, action_size, value_network, name, learning_rate, beta, beta2, gamma, epsilon, lamda, max_grad_norm, epochs, minibatch_size)
 
@@ -146,7 +147,7 @@ class RND(PPO):
 
         curr_step = self.sess.run(self.global_step)
 
-        if curr_step < 10000:
+        if curr_step < self.init_runs:
             for batch in batch_lst:
                 self.run_train_rnd(batch[0])
             self.sess.run(self.increment_global_step, feed_dict={self.step_size : len(batch_lst) * len(batch_lst[0][1])})
