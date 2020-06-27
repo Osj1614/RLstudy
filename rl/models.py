@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import actiontype
+from . import actiontype
 
 LOG_WEIGHT = False
 

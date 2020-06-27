@@ -2,7 +2,7 @@ import numpy as np
 import math
 from .ppo import PPO
 import tensorflow as tf
-import actiontype
+from . import actiontype
 from .running_std import RunningMeanStd
 
 class RND(PPO):
