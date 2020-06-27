@@ -1,7 +1,7 @@
 import numpy as np
 import gym
 from gym.spaces.box import Box
-import atari_wrappers
+from . import atari_wrappers
 from multiprocessing import Pipe, Process
 
 def worker(env_name, pipe, atari=False):

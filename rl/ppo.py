@@ -1,8 +1,8 @@
 import numpy as np
 import math
 import tensorflow as tf
-import actiontype
-from running_std import RunningMeanStd
+from . import actiontype
+from .running_std import RunningMeanStd
 
 class PPO:
     def __init__(self, sess, network, name="", learning_rate=0.00025, beta=0.5, ent_coef=0.01,\

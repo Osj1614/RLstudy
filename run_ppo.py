@@ -3,12 +3,12 @@ import sys
 import pybullet_envs
 import tensorflow as tf
 import numpy as np
-from ppo import PPO
-from rnd import RND
-from trainer import train, run_only
-import actiontype
-import models
-from running_std import RunningMeanStd
+from rl.ppo import PPO
+from rl.rnd import RND
+from rl.trainer import train, run_only
+from rl import actiontype
+from rl import models
+from rl.running_std import RunningMeanStd
 
 def main():
     env_name = 'LunarLander-v2'

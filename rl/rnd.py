@@ -1,9 +1,9 @@
 import numpy as np
 import math
-from ppo import PPO
+from .ppo import PPO
 import tensorflow as tf
 import actiontype
-from running_std import RunningMeanStd
+from .running_std import RunningMeanStd
 
 class RND(PPO):
     def __init__(self, sess, state, state_rms, network, action_type, action_size, target_network, predictor_network, value_in_network, \

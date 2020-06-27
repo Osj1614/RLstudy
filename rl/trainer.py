@@ -4,8 +4,8 @@ import os
 import gym
 import time
 from gym.spaces import Box
-from runner import Runner
-from procrunner import ProcRunner
+from .runner import Runner
+from .procrunner import ProcRunner
 
 def load_model(sess, model, save_path):
     var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, model.name)
