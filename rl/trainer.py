@@ -89,7 +89,6 @@ def run_only(sess, model, env, cnt=100, render=True):
     load_model(sess, model, save_path)
     total_reward = 0
     env.render()
-    runner = Runner(env, 0)
     avg = 0
     high = -1000
     clip = isinstance(env.action_space, Box)

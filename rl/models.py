@@ -69,9 +69,19 @@ def nature_cnn(name='cnn'):
         network = add_cnn(input, 32, (8, 8), strides=(4, 4), activation=tf.nn.relu, name=f'cnn0')
         network = add_cnn(network, 64, (4, 4), strides=(2, 2), activation=tf.nn.relu, name=f'cnn1')
         network = add_cnn(network, 64, (3, 3), strides=(1, 1), activation=tf.nn.relu, name=f'cnn2')
-        network = tf.contrib.layers.flatten(network)            
+        network = tf.contrib.layers.flatten(network)
         network = add_dense(network, 512, activation=tf.nn.relu, name=f'dense0')
         return network
+    return fn
+
+def atari_lstm(n_envs, n_hidden, init_scale=1.0, name="atari_lstm"):
+    def fn(input):
+        network = add_cnn(input, 32, (8, 8), strides=(4, 4), activation=tf.nn.relu, name=f'cnn0')
+        network = add_cnn(network, 64, (4, 4), strides=(2, 2), activation=tf.nn.relu, name=f'cnn1')
+        network = add_cnn(network, 64, (3, 3), strides=(1, 1), activation=tf.nn.relu, name=f'cnn2')
+        network = tf.contrib.layers.flatten(network)
+        network, ns, s, m, i = lstm(n_envs, n_hidden, init_scale=init_scale)(network)
+        return network, ns, s, m, i
     return fn
 
 def lstm(n_envs, n_hidden, init_scale=1.0, name="lstm"):

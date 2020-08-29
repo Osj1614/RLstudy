@@ -1,12 +1,12 @@
 import numpy as np
 import gym
 from gym.spaces.box import Box
-from . import atari_wrappers
+from .atari_wrappers import make_atari, wrap_deepmind
 from multiprocessing import Pipe, Process
 
 def worker(env_name, pipe, atari=False):
     if atari:
-        env = atari_wrappers.wrap_deepmind(atari_wrappers.make_atari(env_name), episode_life=True, clip_rewards=True, frame_stack=True, scale=True)
+        env = wrap_deepmind(make_atari(env_name))
     else:
         env = gym.make(env_name)
     s = env.reset()
